@@ -1,0 +1,43 @@
+{
+  "id": 3,
+  "jsonrpc": "2.0",
+  "method": "call",
+  "params": {
+    "model": "pos.category",
+    "method": "web_search_read",
+    "args": [],
+    "kwargs": {
+      "specification": {
+        "sequence": {},
+        "display_name": {},
+        "parent_id": {
+          "fields": {
+            "display_name": {}
+          }
+        },
+        "color": {}
+      },
+      "offset": 0,
+      "order": "sequence ASC, id ASC",
+      "limit": 80,
+      "context": {
+        "lang": "en_US",
+        "tz": "Asia/Tehran",
+        "uid": 2,
+        "allowed_company_ids": [1],
+        "bin_size": true,
+        "params": {
+          "action": 414,
+          "actionStack": [
+            {
+              "action": 414
+            }
+          ]
+        },
+        "current_company_id": 1
+      },
+      "count_limit": 10001,
+      "domain": []
+    }
+  }
+}

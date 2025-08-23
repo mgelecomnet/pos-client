@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Odoo CORS Test</title>
+    <style>
+        body { padding: 20px; font-family: Arial, sans-serif; }
+        button { margin: 5px; padding: 8px 15px; }
+        .response-info { margin-top: 20px; }
+        .response-info div { margin-bottom: 10px; }
+        pre { background: #f5f5f5; padding: 10px; overflow-x: auto; }
+        .session-info { margin-top: 15px; padding: 10px; background: #e9f5ff; border-radius: 5px; }
+        .log-container { margin-top: 15px; padding: 10px; background: #f9f9f9; border: 1px solid #ddd; max-height: 200px; overflow-y: auto; }
+        .log-entry { margin-bottom: 5px; font-family: monospace; font-size: 0.9em; }
+        .log-info { color: #0066cc; }
+        .log-warn { color: #cc7700; }
+        .log-error { color: #cc0000; }
+    </style>
+</head>
+<body>
+    <h2>Odoo CORS Test</h2>
+    <div class="session-info">
+        <strong>Session ID: </strong><span id="session-id">Not set</span>
+        <button onclick="getSessionFromStorage()" style="margin-left: 10px;">Get from Storage</button>
+        <button onclick="setManualSession()" style="margin-left: 10px;">Set Manually</button>
+        <button onclick="clearSession()" style="margin-left: 10px;">Clear Session</button>
+    </div>
+    <div>
+        <button onclick="testAuthenticate()">Test Login</button>
+        <button onclick="testProducts()">Test Get Products</button>
+        <button onclick="testCategories()">Test Get Categories</button>
+        <button onclick="testPreflight()">Test Preflight</button>
+        <button onclick="testPOSConfigs()">Test POS Configs</button>
+        <button onclick="testPOSSessions()">Test POS Sessions</button>
+        <button onclick="testSessionInfo()">Get Session Info</button>
+    </div>
+    <div class="log-container">
+        <div id="log-entries"></div>
+    </div>
+    <div class="response-info">
+        <div>Request Headers:</div>
+        <pre id="request-headers"></pre>
+        <div>Request Body:</div>
+        <pre id="request-body"></pre>
+        <div>Response Headers:</div>
+        <pre id="response-headers"></pre>
+        <div>Response Data:</div>
+        <pre id="result"></pre>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8069';
+        const DB_NAME = 'qq';
+        let CURRENT_SESSION_ID = '';
+        
+        // Initialize and check for existing session
+        function init() {
+            logInfo('Initializing CORS test page');
+            getSessionFromStorage();
+            
+            // Add button for cookie test
+            const testButton = document.createElement('button');
+            testButton.textContent = 'Debug Cookie Handling';
+            testButton.onclick = testSetCookie;
+            testButton.style.marginLeft = '5px';
+            document.querySelector('.session-info').appendChild(testButton);
+            
+            // Add another button to inspect cookies
+            const inspectButton = document.createElement('button');
+            inspectButton.textContent = 'Inspect Cookies';
+            inspectButton.onclick = inspectCookies;
+            inspectButton.style.marginLeft = '5px';
+            document.querySelector('.session-info').appendChild(inspectButton);
+        }
+
+        // Logging functions
+        function addLogEntry(message, type = 'info') {
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry log-${type}`;
+            logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            
+            const logContainer = document.getElementById('log-entries');
+            logContainer.appendChild(logEntry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+            
+            // Also log to console
+            console[type](message);
+        }
+        
+        function logInfo(message) {
+            addLogEntry(message, 'info');
+        }
+        
+        function logWarning(message) {
+            addLogEntry(message, 'warn');
+        }
+        
+        function logError(message) {
+            addLogEntry(message, 'error');
+        }
+
+        // Session management
+        function updateSessionDisplay() {
+            document.getElementById('session-id').textContent = CURRENT_SESSION_ID || 'Not set';
+        }
+        
+        // Add a function to inspect all cookies
+        function inspectCookies() {
+            logInfo('--- Inspecting Browser Cookies ---');
+            const allCookies = document.cookie;
+            logInfo(`Raw cookie string: ${allCookies}`);
+            
+            // Parse individual cookies
+            const cookies = allCookies.split(';');
+            if (cookies.length === 0 || (cookies.length === 1 && cookies[0].trim() === '')) {
+                logInfo('No cookies found in browser');
+            } else {
+                cookies.forEach((cookie, index) => {
+                    const trimmed = cookie.trim();
+                    logInfo(`Cookie ${index + 1}: ${trimmed}`);
+                    
+                    // Check if it's a session cookie
+                    if (trimmed.startsWith('session_id=')) {
+                        const sessionValue = trimmed.substring('session_id='.length);
+                        logInfo(`Found session_id cookie: "${sessionValue}"`);
+                    }
+                });
+            }
+            logInfo('-------------------------------');
+        }
+
+        // Update the getSessionFromStorage function
+        function getSessionFromStorage() {
+            let sessionId = '';
+            
+            // Log all cookies first for debugging
+            inspectCookies();
+            
+            // Try to get from localStorage first
+            try {
+                const userData = JSON.parse(localStorage.getItem('user') || '{}');
+                if (userData && userData.session_id) {
+                    sessionId = userData.session_id;
+                    logInfo(`Found session ID in localStorage: ${sessionId}`);
+                }
+            } catch (e) {
+                logWarning(`Error reading from localStorage: ${e.message}`);
+            }
+            
+            // If not found, try cookies
+            if (!sessionId) {
+                const cookies = document.cookie.split(';');
+                for (const cookie of cookies) {
+                    const [name, value] = cookie.trim().split('=');
+                    if (name === 'session_id') {
+                        sessionId = value;
+                        logInfo(`Found session ID in cookies: ${sessionId}`);
+                        break;
+                    }
+                }
+            }
+            
+            if (!sessionId) {
+                logWarning('No session ID found in storage or cookies');
+            }
+            
+            CURRENT_SESSION_ID = sessionId;
+            updateSessionDisplay();
+            return sessionId;
+        }
+        
+        function setManualSession() {
+            const input = prompt('Enter session ID:', CURRENT_SESSION_ID);
+            if (input !== null) {
+                CURRENT_SESSION_ID = input.trim();
+                logInfo(`Manually set session ID to: ${CURRENT_SESSION_ID}`);
+                updateSessionDisplay();
+                
+                // Also save to localStorage for testing
+                try {
+                    const userData = JSON.parse(localStorage.getItem('user') || '{}');
+                    userData.session_id = CURRENT_SESSION_ID;
+                    localStorage.setItem('user', JSON.stringify(userData));
+                    
+                    // Set cookie too
+                    document.cookie = `session_id=${CURRENT_SESSION_ID}; path=/; max-age=86400`;
+                    logInfo('Saved session ID to localStorage and cookie');
+                } catch (e) {
+                    logError(`Error saving to localStorage: ${e.message}`);
+                }
+            }
+        }
+        
+        function clearSession() {
+            CURRENT_SESSION_ID = '';
+            updateSessionDisplay();
+            localStorage.removeItem('user');
+            document.cookie = "session_id=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+            logInfo('Session cleared from storage and cookies');
+        }
+
+        // UI functions
+        function showResult(data) {
+            document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+        }
+
+        function showRequestBody(body) {
+            document.getElementById('request-body').textContent = JSON.stringify(body, null, 2);
+        }
+
+        function showHeaders(headers, elementId) {
+            document.getElementById(elementId).textContent = JSON.stringify(headers, null, 2);
+        }
+
+        function showError(error) {
+            document.getElementById('result').textContent = 'Error: ' + error.message + '\n\nStack: ' + error.stack;
+            logError(`Request error: ${error.message}`);
+        }
+
+        // Add function to safely access properties that might be undefined
+        function safeGet(obj, path, defaultValue = 'N/A') {
+            if (!obj) return defaultValue;
+            
+            // Handle array notation like 'config_id[1]'
+            if (path.includes('[') && path.includes(']')) {
+                const propName = path.split('[')[0];
+                const index = parseInt(path.split('[')[1].split(']')[0]);
+                
+                if (!obj[propName] || !Array.isArray(obj[propName]) || obj[propName].length <= index) {
+                    return defaultValue;
+                }
+                
+                return obj[propName][index];
+            }
+            
+            // Handle dot notation like 'company_id.name'
+            const parts = path.split('.');
+            let current = obj;
+            
+            for (const part of parts) {
+                if (current === undefined || current === null) {
+                    return defaultValue;
+                }
+                current = current[part];
+            }
+            
+            return current !== undefined ? current : defaultValue;
+        }
+
+        // Main request function
+        async function makeRequest(url, body) {
+            logInfo(`Making request to: ${url}`);
+            
+            // Log cookies before request
+            logInfo('Cookies before request:');
+            inspectCookies();
+            
+            // Get current session ID
+            const sessionId = CURRENT_SESSION_ID || getSessionFromStorage();
+            
+            // Create headers
+            const headers = {
+                'X-Openerp-Session-Id': sessionId,
+                'Content-Type': 'application/json'
+            };
+            
+            // Add session ID to headers if available
+            if (sessionId) {
+                headers['X-Openerp-Session-Id'] = sessionId;
+                logInfo(`Adding session ID to headers: ${sessionId}`);
+            } else {
+                logWarning('No session ID available for request');
+            }
+            
+            // Add session ID to request body if appropriate
+            if (body && body.params && body.jsonrpc === '2.0') {
+                // Always set the db parameter
+                body.params.db = DB_NAME;
+                
+                // Add session_id to params if not already there
+                if (sessionId && !body.params.session_id) {
+                    body.params.session_id = sessionId;
+                    logInfo('Added session_id to request params');
+                }
+                
+                // Add context with session if not there
+                if (!body.params.kwargs) {
+                    body.params.kwargs = {};
+                }
+                
+                if (!body.params.kwargs.context) {
+                    body.params.kwargs.context = {};
+                }
+                
+                // Ensure session is in context
+                if (sessionId && !body.params.kwargs.context.session_id) {
+                    body.params.kwargs.context.session_id = sessionId;
+                    logInfo('Added session_id to request context');
+                }
+            }
+            
+            // Log modified request body
+            showRequestBody(body);
+            showHeaders(headers, 'request-headers');
+            
+            logInfo('Sending request...');
+            
+            try {
+            const response = await fetch(url, {
+                method: 'POST',
+                credentials: 'include',
+                headers: headers,
+                body: JSON.stringify(body)
+            });
+
+                // Log response status
+                logInfo(`Response status: ${response.status} ${response.statusText}`);
+                
+                // Process response headers in detail
+                logInfo('--- Response Headers (Raw) ---');
+            const responseHeaders = {};
+            response.headers.forEach((value, key) => {
+                responseHeaders[key] = value;
+                    logInfo(`${key}: ${value}`);
+            });
+            showHeaders(responseHeaders, 'response-headers');
+            
+                // Specifically check for raw Set-Cookie header
+                const setCookieHeader = response.headers.get('set-cookie');
+                if (setCookieHeader) {
+                    logInfo(`Raw Set-Cookie header: ${setCookieHeader}`);
+                    
+                    // Try to extract session ID from cookie
+                    if (setCookieHeader.includes('session_id=')) {
+                        logInfo('Set-Cookie header contains session_id!');
+                        
+                        // Complex regex to extract the session ID value
+                        const sessionMatch = setCookieHeader.match(/session_id=([^;]+)/);
+                        if (sessionMatch && sessionMatch[1]) {
+                            const newSessionId = sessionMatch[1].trim();
+                            logInfo(`Extracted session ID from Set-Cookie: '${newSessionId}'`);
+                            
+                            CURRENT_SESSION_ID = newSessionId;
+                            updateSessionDisplay();
+                            
+                            // Manually set the cookie in the browser
+                            document.cookie = `session_id=${newSessionId}; path=/; max-age=86400`;
+                            logInfo(`Manually set session_id cookie to: ${newSessionId}`);
+                        }
+                    }
+                } else {
+                    logInfo('No Set-Cookie header found in response');
+                }
+                
+                // Log cookies after response
+                logInfo('Cookies after response:');
+                inspectCookies();
+                
+                // Process response data
+                const responseData = await response.json();
+                logInfo('Response data received');
+                
+                // Check for session_id in response data
+                if (responseData && responseData.result && responseData.result.session_id) {
+                    const newSessionId = responseData.result.session_id;
+                    logInfo(`Found session ID in response data: ${newSessionId}`);
+                    
+                    CURRENT_SESSION_ID = newSessionId;
+                    updateSessionDisplay();
+                    
+                    // Save to localStorage and cookie
+                    try {
+                        const userData = JSON.parse(localStorage.getItem('user') || '{}');
+                        userData.session_id = newSessionId;
+                        localStorage.setItem('user', JSON.stringify(userData));
+                        document.cookie = `session_id=${newSessionId}; path=/; max-age=86400`;
+                        logInfo('Saved new session ID to localStorage and cookie');
+                        
+                        // Verify the cookie was set
+                        setTimeout(inspectCookies, 100);
+                    } catch (e) {
+                        logError(`Error saving to localStorage: ${e.message}`);
+                    }
+                }
+                
+                // Check for errors in response
+                if (responseData && responseData.error) {
+                    logError(`Error in response: ${responseData.error.message || JSON.stringify(responseData.error)}`);
+                    if (responseData.error.data && responseData.error.data.message) {
+                        logError(`Error details: ${responseData.error.data.message}`);
+                    }
+                }
+                
+                return responseData;
+            } catch (error) {
+                logError(`Fetch error: ${error.message}`);
+                throw error;
+            }
+        }
+
+        async function testSessionInfo() {
+            logInfo('Testing session info...');
+            try {
+                const data = await makeRequest(`${API_URL}/web/session/get_session_info`, {
+                    jsonrpc: '2.0',
+                    method: 'call',
+                    params: {}
+                });
+                showResult(data);
+                
+                if (data.result) {
+                    logInfo(`Session info retrieved successfully. User ID: ${data.result.uid || 'Not available'}`);
+                    console.log('Session info:', data.result);
+                }
+            } catch (error) {
+                showError(error);
+            }
+        }
+
+        async function testPreflight() {
+            logInfo('Testing CORS preflight...');
+            try {
+                // First create a preflight (OPTIONS) request
+                const headers = {
+                    'Access-Control-Request-Method': 'POST',
+                    'Access-Control-Request-Headers': 'content-type,accept,x-requested-with,x-openerp-session-id',
+                    'Origin': window.location.origin
+                };
+                
+                showHeaders(headers, 'request-headers');
+                showRequestBody({});
+                
+                // Make the preflight request
+                const resp = await fetch(`${API_URL}/web/session/authenticate`, {
+                    method: 'OPTIONS',
+                    credentials: 'include',
+                    headers: headers
+                });
+                
+                const responseHeaders = {};
+                resp.headers.forEach((value, key) => {
+                    responseHeaders[key] = value;
+                });
+                showHeaders(responseHeaders, 'response-headers');
+                
+                const result = {
+                    status: resp.status,
+                    statusText: resp.statusText,
+                    ok: resp.ok,
+                    allowMethods: resp.headers.get('Access-Control-Allow-Methods'),
+                    allowHeaders: resp.headers.get('Access-Control-Allow-Headers'),
+                    allowOrigin: resp.headers.get('Access-Control-Allow-Origin'),
+                    allowCredentials: resp.headers.get('Access-Control-Allow-Credentials')
+                };
+                
+                showResult(result);
+                
+                if (resp.ok) {
+                    logInfo('CORS preflight successful');
+                } else {
+                    logError(`CORS preflight failed: ${resp.status} ${resp.statusText}`);
+                }
+            } catch (error) {
+                showError(error);
+            }
+        }
+
+        async function testAuthenticate() {
+            logInfo('Testing authentication...');
+            try {
+                const data = await makeRequest(`${API_URL}/web/session/authenticate`, {
+                    jsonrpc: '2.0',
+                    params: {
+                        db: DB_NAME,
+                        login: 'admin',
+                        password: '123'
+                    }
+                });
+                showResult(data);
+                
+                if (data.result && data.result.uid) {
+                    logInfo(`Authentication successful. User ID: ${data.result.uid}`);
+                    logInfo(`Username: ${safeGet(data.result, 'username')}`);
+                    
+                    // Safely access company_id which might be undefined or not an array
+                    const companyName = safeGet(data.result, 'company_id[1]', 'Unknown Company');
+                    logInfo(`Company: ${companyName}`);
+                    
+                    // Save user data to localStorage
+                    try {
+                        localStorage.setItem('user', JSON.stringify(data.result));
+                        logInfo('User data saved to localStorage');
+                    } catch (e) {
+                        logError(`Error saving to localStorage: ${e.message}`);
+                    }
+                } else if (data.error) {
+                    logError(`Authentication failed: ${data.error.message || JSON.stringify(data.error)}`);
+                } else {
+                    logWarning('Authentication response has unexpected format');
+                }
+            } catch (error) {
+                showError(error);
+            }
+        }
+
+        async function testProducts() {
+            logInfo('Testing product listing...');
+            try {
+                const data = await makeRequest(`${API_URL}/web/dataset/call_kw`, {
+                    jsonrpc: '2.0',
+                    method: 'call',
+                    params: {
+                        model: 'product.product',
+                        method: 'search_read',
+                        args: [
+                            [['available_in_pos', '=', true]],
+                            ['id', 'name', 'list_price']
+                        ],
+                        kwargs: {
+                            context: {}
+                        },
+                    }
+                });
+                showResult(data);
+                
+                if (data.result) {
+                    logInfo(`Retrieved ${data.result.length} products`);
+                    console.log('Products:', data.result);
+                }
+            } catch (error) {
+                showError(error);
+            }
+        }
+
+        async function testCategories() {
+            logInfo('Testing category listing...');
+            try {
+                const data = await makeRequest(`${API_URL}/web/dataset/call_kw`, {
+                    jsonrpc: '2.0',
+                    method: 'call',
+                    params: {
+                        model: 'pos.category',
+                        method: 'search_read',
+                        args: [],
+                        kwargs: {
+                            context: {},
+                            fields: ['id', 'name', 'parent_id', 'child_ids']
+                        }
+                    }
+                });
+                showResult(data);
+                
+                if (data.result) {
+                    logInfo(`Retrieved ${data.result.length} categories`);
+                    console.log('Categories:', data.result);
+                }
+            } catch (error) {
+                showError(error);
+            }
+        }
+
+        async function testPOSConfigs() {
+            logInfo('Testing POS configs...');
+            try {
+                const data = await makeRequest(`${API_URL}/web/dataset/call_kw`, {
+                    jsonrpc: '2.0',
+                    method: 'call',
+                    params: {
+                        model: 'pos.config',
+                        method: 'search_read',
+                        args: [
+                            [],
+                            ['id', 'name', 'current_session_id', 'current_session_state']
+                        ],
+                        kwargs: {
+                            context: {}
+                        }
+                    }
+                });
+                showResult(data);
+                
+                if (data.result) {
+                    logInfo(`Retrieved ${data.result.length} POS configs`);
+                    
+                    // Log active configs with sessions
+                    const activeConfigs = data.result.filter(c => c.current_session_id);
+                    if (activeConfigs.length > 0) {
+                        logInfo(`Found ${activeConfigs.length} configs with active sessions:`);
+                        activeConfigs.forEach(c => {
+                            // Safely access the session ID which might be undefined or not an array
+                            const sessionId = safeGet(c, 'current_session_id[0]', 'Unknown');
+                            const sessionState = safeGet(c, 'current_session_state', 'Unknown');
+                            logInfo(`- Config '${c.name}' has session ID ${sessionId} (${sessionState})`);
+                        });
+                    } else {
+                        logInfo('No configs have active sessions');
+                    }
+                    
+                    console.log('POS Configs:', data.result);
+                }
+            } catch (error) {
+                showError(error);
+            }
+        }
+
+        async function testPOSSessions() {
+            logInfo('Testing POS sessions...');
+            
+            // Get user ID from localStorage
+            let userId = 2; // Default to specific user ID
+            try {
+                const userData = JSON.parse(localStorage.getItem('user') || '{}');
+                if (userData && userData.uid) {
+                    userId = userData.uid;
+                    logInfo(`Using user ID from localStorage: ${userId}`);
+                } else {
+                    logInfo(`Using default user ID: ${userId}`);
+                }
+            } catch (e) {
+                logWarning(`Error getting user ID from localStorage: ${e.message}`);
+            }
+            
+            try {
+                const data = await makeRequest(`${API_URL}/web/dataset/call_kw`, {
+                    jsonrpc: '2.0',
+                    method: 'call',
+                    params: {
+                        model: 'pos.session',
+                        method: 'search_read',
+                        args: [
+                            [
+                                ['state', 'in', ['opened', 'opening_control']],
+                                ['user_id', '=', userId] // Filter for specific user
+                            ],
+                            ['id', 'name', 'config_id', 'user_id', 'start_at', 'stop_at', 'state']
+                        ],
+                        kwargs: {
+                            context: {}
+                        }
+                    }
+                });
+                showResult(data);
+                
+                if (data.result) {
+                    logInfo(`Retrieved ${data.result.length} active POS sessions for user ${userId}`);
+                    
+                    // Log session details
+                    data.result.forEach((session, i) => {
+                        // Safely access nested properties
+                        const configId = safeGet(session, 'config_id[0]', 'Unknown');
+                        const configName = safeGet(session, 'config_id[1]', 'Unknown Config');
+                        const userId = safeGet(session, 'user_id[0]', 'Unknown');
+                        const userName = safeGet(session, 'user_id[1]', 'Unknown User');
+                        
+                        logInfo(`Session ${i+1}: ID=${session.id}, Name='${session.name}', State='${session.state}'`);
+                        logInfo(`  Config: ${configName} (ID: ${configId})`);
+                        logInfo(`  User: ${userName} (ID: ${userId})`);
+                        logInfo(`  Started: ${session.start_at || 'Unknown'}`);
+                    });
+                    
+                    console.log('POS Sessions:', data.result);
+                }
+            } catch (error) {
+                showError(error);
+            }
+        }
+
+        // Add new test function to specifically debug the Set-Cookie issue
+        async function testSetCookie() {
+            logInfo('Testing Set-Cookie handling...');
+            
+            // Clear any existing cookies first
+            document.cookie = "session_id=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+            logInfo('Cleared existing session_id cookie');
+            
+            try {
+                // First authenticate to get a new session cookie
+                const authResult = await fetch(`${API_URL}/web/session/authenticate`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': '*/*'
+                    },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        params: {
+                            db: DB_NAME,
+                            login: 'admin',
+                            password: '123'
+                        }
+                    })
+                });
+                
+                logInfo(`Auth response status: ${authResult.status} ${authResult.statusText}`);
+                
+                // Log all response headers in detail
+                logInfo('--- Auth Response Headers ---');
+                const headers = {};
+                authResult.headers.forEach((value, key) => {
+                    headers[key] = value;
+                    logInfo(`${key}: ${value}`);
+                });
+                
+                // Check specifically for Set-Cookie
+                const setCookieHeaders = authResult.headers.getAll ? 
+                    authResult.headers.getAll('Set-Cookie') : 
+                    [authResult.headers.get('Set-Cookie')].filter(Boolean);
+                
+                if (setCookieHeaders && setCookieHeaders.length > 0) {
+                    logInfo(`Found ${setCookieHeaders.length} Set-Cookie headers:`);
+                    setCookieHeaders.forEach((cookie, i) => {
+                        logInfo(`Cookie ${i+1}: ${cookie}`);
+                        
+                        // Try to manually apply this cookie
+                        if (cookie.includes('session_id=')) {
+                            const sessionMatch = cookie.match(/session_id=([^;]+)/);
+                            if (sessionMatch && sessionMatch[1]) {
+                                const newSessionId = sessionMatch[1].trim();
+                                logInfo(`Extracted session ID: '${newSessionId}'`);
+                                
+                                // Set it manually
+                                document.cookie = `session_id=${newSessionId}; path=/`;
+                                logInfo(`Manually set session cookie to: ${newSessionId}`);
+                            }
+                        }
+                    });
+                } else {
+                    logInfo('No Set-Cookie headers found');
+                }
+                
+                // Try to parse the response for session info
+                const data = await authResult.json();
+                if (data && data.result && data.result.session_id) {
+                    const sessionId = data.result.session_id;
+                    logInfo(`Found session ID in response data: ${sessionId}`);
+                    
+                    // Set cookie manually
+                    document.cookie = `session_id=${sessionId}; path=/; max-age=86400`;
+                    logInfo(`Manually set session cookie from response data: ${sessionId}`);
+                }
+                
+                showResult(data);
+                
+                // Check if cookies were set
+                setTimeout(() => {
+                    logInfo('Checking cookies after auth request:');
+                    inspectCookies();
+                }, 500);
+                
+            } catch (error) {
+                logError(`Cookie test error: ${error.message}`);
+                showError(error);
+            }
+        }
+        
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html> 

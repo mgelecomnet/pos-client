@@ -1,0 +1,3268 @@
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import {
+  Box,
+  Flex,
+  VStack,
+  HStack,
+  Text,
+  Button,
+  Input,
+  InputGroup,
+  InputLeftElement,
+  Tabs,
+  TabList,
+  TabPanels,
+  Tab,
+  TabPanel,
+  Grid,
+  Drawer,
+  DrawerBody,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerOverlay,
+  DrawerContent,
+  DrawerCloseButton,
+  useDisclosure,
+  Avatar,
+  Badge,
+  useToast,
+  Modal,
+  ModalOverlay,
+  ModalContent,
+  ModalHeader,
+  ModalFooter,
+  ModalBody,
+  ModalCloseButton,
+  Spinner,
+  Divider,
+  Select,
+  Checkbox,
+  IconButton,
+  Tooltip,
+  Alert,
+  AlertIcon,
+  AlertTitle,
+  AlertDescription,
+  useColorModeValue,
+  Menu,
+  MenuButton,
+  MenuList,
+  MenuItem,
+  chakra,
+  Icon,
+  Collapse,
+  SimpleGrid,
+  Progress,
+  Stat,
+  StatLabel,
+  StatNumber,
+  StatHelpText,
+  Card,
+  CardHeader,
+  CardBody,
+  CardFooter,
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+  PopoverHeader,
+  PopoverBody,
+  PopoverArrow,
+  PopoverCloseButton,
+  Tag
+} from '@chakra-ui/react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  FiShoppingCart,
+  FiBox,
+  FiDollarSign,
+  FiUser,
+  FiPlus,
+  FiMinus,
+  FiTrash2,
+  FiSearch,
+  FiGrid,
+  FiChevronLeft,
+  FiChevronRight,
+  FiMenu,
+  FiSettings,
+  FiRotateCcw,
+  FiCheck,
+  FiX,
+  FiInfo,
+  FiAlertCircle,
+  FiArrowLeft,
+  FiArrowRight,
+  FiCreditCard,
+  FiPrinter,
+  FiRefreshCw,
+  FiClock,
+  FiCalendar,
+  FiFilter,
+  FiShield,
+  FiCheckCircle,
+  FiUsers,
+  FiHome,
+  FiFileText,
+  FiServer,
+  FiBarChart2,
+  FiSave,
+  FiWifi,
+  FiWifiOff,
+  FiZap,
+  FiThumbsUp,
+  FiTag,
+  FiPercent,
+  FiEdit,
+  FiEye,
+  FiPhoneCall,
+  FiMoreHorizontal,
+  FiPlusCircle,
+} from 'react-icons/fi';
+import { authService, productService, categoryService, orderService } from '../api/odoo';
+import odooApi from '../api/odooApi';
+import sessionManager from '../api/sessionManager';
+import offlineOrderService, { OFFLINE_ORDER_STATUS } from '../api/offlineOrderService';
+import CategoryManagementModal from '../components/CategoryManagementModal';
+import CustomerManagementModal from '../components/CustomerManagementModal';
+import CustomerSelectorModal from '../components/CustomerSelectorModal';
+import ProductManagementModal from '../components/ProductManagementModal';
+import ProductItem from '../components/ProductItem';
+import CartItem from '../components/CartItem';
+import PaymentScreen from '../components/PaymentScreen';
+import OrderComplete from '../components/OrderComplete';
+import { loadPOSData, getLocalPOSData, inspectDatabase } from '../api/odooApi';
+import OrderType from '../components/OrderType';
+
+
+// Main POS page component
+const POSPage = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { posSidebarOpen, setPOSSidebarOpen, headerSearchText, setHeaderSearchText, activeOrderId } = useOutletContext();
+  
+  // State for products data
+  const [products, setProducts] = useState([]);
+  const [filteredProducts, setFilteredProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [cart, setCart] = useState([]);
+  const [orderId, setOrderId] = useState(null);
+  const [orderType, setOrderType] = useState('dine_in');
+  
+  // Selected customer state
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [activePOSSession, setActivePOSSession] = useState(null);
+  const [posConfigs, setPosConfigs] = useState([]);
+  const [isCreatingSession, setIsCreatingSession] = useState(false);
+  const [selectedConfig, setSelectedConfig] = useState(null);
+  const toast = useToast();
+  const { isOpen: isSessionModalOpen, onOpen: onSessionModalOpen, onClose: onSessionModalClose } = useDisclosure();
+  const { isOpen: isCategoriesModalOpen, onOpen: onCategoriesModalOpen, onClose: onCategoriesModalClose } = useDisclosure();
+  const { isOpen: isCustomersModalOpen, onOpen: onCustomersModalOpen, onClose: onCustomersModalClose } = useDisclosure();
+  const { isOpen: isCustomerSelectorOpen, onOpen: onCustomerSelectorOpen, onClose: onCustomerSelectorClose } = useDisclosure();
+  const { isOpen: isProductsModalOpen, onOpen: onProductsModalOpen, onClose: onProductsModalClose } = useDisclosure();
+  const [sessions, setSessions] = useState([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [sessionActionInProgress, setSessionActionInProgress] = useState(false);
+  const [categoryColors, setCategoryColors] = useState({});
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
+  const [isUpdatingCategory, setIsUpdatingCategory] = useState(false);
+  const [isDeletingCategory, setIsDeletingCategory] = useState(false);
+  const [categoryToDelete, setCategoryToDelete] = useState(null);
+  const [categoryImage, setCategoryImage] = useState(null);
+  const [previewImage, setPreviewImage] = useState('');
+  const [categoryColor, setCategoryColor] = useState('#FFFFFF');
+  const cancelRef = React.useRef();
+  // برای جلوگیری از فراخوانی مکرر fetchActiveSessions
+  const loadedSessions = useRef(false);
+
+  // Add a ref to track cart
+  const cartRef = useRef([]);
+  
+  // Update ref whenever cart changes
+  useEffect(() => {
+    cartRef.current = cart;
+  }, [cart]);
+
+  // Helper function to save cart to localStorage
+  const saveCartToLocalStorage = useCallback((orderIdToSave, cartData) => {
+    if (!orderIdToSave) {
+      console.warn('[POSPage] Cannot save cart: No order ID provided');
+      return;
+    }
+    
+    try {
+      const cartKey = `pos_cart_${orderIdToSave}`;
+      localStorage.setItem(cartKey, JSON.stringify(cartData || []));
+      console.log('[POSPage] Saved cart to localStorage for order:', orderIdToSave, 'Items:', cartData?.length || 0);
+    } catch (error) {
+      console.error('[POSPage] Error saving cart to localStorage:', error);
+    }
+  }, []);
+
+  // Helper function to load cart from localStorage
+  const loadCartFromLocalStorage = useCallback((orderIdToLoad) => {
+    if (!orderIdToLoad) {
+      console.warn('[POSPage] Cannot load cart: No order ID provided');
+      return [];
+    }
+    
+    try {
+      const cartKey = `pos_cart_${orderIdToLoad}`;
+      const savedCartData = localStorage.getItem(cartKey);
+      
+      if (!savedCartData) {
+        console.log('[POSPage] No cart data found for order:', orderIdToLoad);
+        return [];
+      }
+      
+      const parsedCart = JSON.parse(savedCartData);
+      console.log('[POSPage] Loaded cart from localStorage for order:', orderIdToLoad, 'Items:', parsedCart.length);
+      return Array.isArray(parsedCart) ? parsedCart : [];
+    } catch (error) {
+      console.error('[POSPage] Error loading cart from localStorage:', error);
+      return [];
+    }
+  }, []);
+  
+  // Load active order from localStorage on mount
+  useEffect(() => {
+    try {
+      const savedActiveId = localStorage.getItem('pos_active_order_id');
+      const savedOrders = JSON.parse(localStorage.getItem('pos_orders') || '[]');
+      
+      if (savedActiveId && savedOrders.length > 0) {
+        const activeOrder = savedOrders.find(order => order.id === savedActiveId);
+        if (activeOrder) {
+          setOrderId(activeOrder.id);
+          setCart(activeOrder.cart || []);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading active order:', error);
+    }
+  }, []);
+  
+  // Watch for localStorage changes to sync active order across tabs
+  useEffect(() => {
+    const handleStorageChange = (e) => {
+      if (e.key === 'pos_active_order') {
+        try {
+          // Save current cart before switching to new order
+          if (activePOSSession?.id) {
+            saveCartToLocalStorage(activePOSSession.id, cart);
+          }
+          
+          const newActiveOrder = JSON.parse(e.newValue || 'null');
+          
+          if (newActiveOrder && newActiveOrder.id !== activePOSSession?.id) {
+            setActivePOSSession(newActiveOrder);
+            
+            // Load the cart for the new active order
+            const newCart = loadCartFromLocalStorage(newActiveOrder.id);
+            setCart(newCart);
+            
+            console.log('Active order changed from localStorage:', newActiveOrder);
+          }
+        } catch (error) {
+          console.error('Error handling storage change:', error);
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, [activePOSSession, cart, saveCartToLocalStorage, loadCartFromLocalStorage]);
+  
+  // Helper function to save the current cart
+  const saveCurrentCart = useCallback(() => {
+    if (!orderId) return;
+    
+    try {
+      console.log('Manually saving current cart for order:', orderId, 'Items:', cart.length);
+      saveCartToLocalStorage(orderId, [...cart]); // Create a copy to avoid reference issues
+    } catch (error) {
+      console.error('Error manually saving cart:', error);
+    }
+  }, [orderId, cart, saveCartToLocalStorage]);
+
+  // Listen for order tab change events dispatched from AppLayout
+  useEffect(() => {
+    const handleOrderChange = (e) => {
+      try {
+        const { orderId: newOrderId, previousOrderId } = e.detail;
+        console.log('[POSPage] Order tab changed event received:', newOrderId, 'from', previousOrderId);
+        
+        // First save the current cart explicitly if it's not empty
+        if (previousOrderId && cart.length > 0) {
+          console.log('[POSPage] Saving current cart for previous order:', previousOrderId, 'Items:', cart.length);
+          saveCartToLocalStorage(previousOrderId, [...cart]);
+        }
+        
+        // Then update order ID
+        setOrderId(newOrderId);
+        
+        // Finally load the new cart
+        const newCart = loadCartFromLocalStorage(newOrderId);
+        console.log('[POSPage] Loaded cart for new order:', newOrderId, 'Items:', newCart?.length || 0);
+        
+        // Important: Only set cart when we actually have content to avoid clearing it unintentionally
+        if (newCart) {
+          setCart(newCart);
+        }
+      } catch (error) {
+        console.error('[POSPage] Error handling order change:', error);
+      }
+    };
+
+    // Register the event listener
+    window.addEventListener('pos_order_tab_changed', handleOrderChange);
+    
+    // Clean up function
+    return () => {
+      window.removeEventListener('pos_order_tab_changed', handleOrderChange);
+    };
+  }, [cart, saveCartToLocalStorage, loadCartFromLocalStorage]);
+  
+  // Separate effect to save cart changes to localStorage
+  useEffect(() => {
+    if (orderId) {
+      // Create a debounce function to avoid too many localStorage updates
+      const timeoutId = setTimeout(() => {
+        // Use helper function to save cart
+        console.log('Auto-saving cart for order:', orderId, 'Items:', cart.length);
+        saveCartToLocalStorage(orderId, cart);
+      }, 500); // 500ms debounce
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [cart, orderId, saveCartToLocalStorage]);
+
+  // Use the headerSearchText as our search text
+  const searchText = headerSearchText;
+  const setSearchText = setHeaderSearchText;
+
+  // Function to fetch active sessions
+  const fetchActiveSessions = useCallback(async () => {
+    try {
+      setLoadingSessions(true);
+      const activeSessions = await sessionManager.getAllActiveSessions();
+      setSessions(activeSessions);
+    } catch (error) {
+      console.error('Error fetching active sessions:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to fetch active sessions',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    } finally {
+      setLoadingSessions(false);
+    }
+  }, [toast]);
+
+  // Check URL params for session manager
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+    if (searchParams.get('openSessionManager') === 'true') {
+      // Remove parameter from URL to avoid reopening on refresh
+      navigate('/pos', { replace: true });
+      // Open session manager
+      fetchActiveSessions();
+      onSessionModalOpen();
+    }
+  }, [location, navigate, onSessionModalOpen, fetchActiveSessions]);
+
+  // Check if there's an active session before showing POS UI
+  useEffect(() => {
+    if (activePOSSession) {
+      setShowPOSUI(true);
+    } else {
+      setShowPOSUI(false);
+      // فقط یکبار سشن‌ها را بارگیری می‌کنیم
+      if (sessions.length === 0 && !loadingSessions && !loadedSessions.current) {
+        loadedSessions.current = true;
+        fetchActiveSessions();
+      }
+    }
+  }, [activePOSSession]);  // فقط به تغییرات activePOSSession واکنش نشان می‌دهیم
+
+  // Load products, categories and active POS session on mount
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setIsLoading(true);
+        
+        // Step 1: Get POS configs first (needed for session search)
+        let configsData = [];
+        try {
+          console.log('Fetching POS configs...');
+          configsData = await orderService.getPOSConfigs();
+          console.log(`Received ${configsData.length} POS configs`, configsData);
+          setPosConfigs(configsData);
+          if (configsData.length > 0) {
+            setSelectedConfig(configsData[0].id);
+          }
+        } catch (error) {
+          console.error('Error fetching POS configs:', error);
+          toast({
+            title: 'Error',
+            description: 'Failed to load POS configs',
+            status: 'warning',
+            duration: 5000,
+            isClosable: true,
+          });
+        }
+        
+        // Step 2: Check for existing sessions
+        let existingSession = null;
+        try {
+          // First check active sessions
+          console.log('Fetching active POS sessions...');
+          const sessions = await orderService.getPOSSession();
+          
+          if (sessions && sessions.length > 0) {
+            console.log('Using active POS session:', sessions[0]);
+            existingSession = sessions[0];
+            setActivePOSSession(existingSession);
+          } 
+          // If no active session found via general search, try to find one for each specific config
+          else if (configsData.length > 0) {
+            console.log('No active session found directly, checking each config...');
+            
+            // Try each config in order
+            for (const config of configsData) {
+              console.log(`Checking for existing session for config ${config.name} (${config.id})...`);
+              const foundSession = await sessionManager.getExistingSessionByConfig(config.id);
+              
+              if (foundSession) {
+                console.log(`Found existing session for config ${config.name}:`, foundSession);
+                existingSession = foundSession;
+                setActivePOSSession(foundSession);
+                
+                toast({
+                  title: 'Session Found',
+                  description: `Using existing session: ${foundSession.name}`,
+                  status: 'success',
+                  duration: 3000,
+                  isClosable: true,
+                });
+                
+                break;
+              }
+            }
+            
+            if (!existingSession) {
+              console.warn('No active or existing POS session found after checking all configs');
+              toast({
+                title: 'No Active Session',
+                description: 'No active POS session found. You will need to create a new session.',
+                status: 'warning',
+                duration: 5000,
+                isClosable: true,
+              });
+            }
+          }
+        } catch (error) {
+          console.error('Error fetching POS sessions:', error);
+        }
+        
+        // Step 3: Get categories
+        try {
+          console.log('Fetching POS categories from local IndexedDB...');
+          // Use only the local database function 
+          const localCategories = await getLocalPOSData.getCategories();
+          
+          if (localCategories && localCategories.length > 0) {
+            console.log(`Found ${localCategories.length} POS categories in local database`);
+            setCategories(localCategories);
+          } else {
+            console.warn('No categories found in local database');
+            // Not falling back to server anymore
+            setCategories([]);
+            toast({
+              title: 'No Categories Found',
+              description: 'No categories found in local database. Please load data first.',
+              status: 'warning',
+              duration: 3000,
+              isClosable: true,
+            });
+          }
+        } catch (error) {
+          console.error('Error fetching POS categories from local database:', error);
+          toast({
+            title: 'Error',
+            description: 'Failed to load POS categories from local database',
+            status: 'warning',
+            duration: 5000,
+            isClosable: true,
+          });
+        }
+        
+        // Step 4: Get products (only if we have a session)
+        if (existingSession) {
+          try {
+            console.log('Fetching products using active session...');
+            const productsData = await productService.getProducts();
+            console.log(`Received ${productsData.length} products`, productsData);
+            setProducts(productsData);
+            setFilteredProducts(productsData);
+          } catch (error) {
+            console.error('Error fetching products:', error);
+            toast({
+              title: 'Error',
+              description: 'Failed to load products',
+              status: 'error',
+              duration: 5000,
+              isClosable: true,
+            });
+          }
+        }
+      } catch (error) {
+        console.error('General error in fetchData:', error);
+        toast({
+          title: 'Error',
+          description: 'Failed to load data',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [toast]);
+
+  // Watch for changes in activePOSSession and force reload UI if needed
+  useEffect(() => {
+    console.log('Active POS session changed:', activePOSSession);
+    
+    // If we have a session but no products, reload products
+    if (activePOSSession) {
+      // Fetch categories as soon as we have an active session
+      if (categories.length === 0) {
+        console.log('Categories not loaded yet, fetching them now...');
+        fetchCategories();
+      }
+      
+      if (!products || products.length === 0) {
+        const loadProducts = async () => {
+          try {
+            console.log('Loading products ONLY from local IndexedDB database');
+            setIsLoading(true);
+            
+            // Get products with retry to ensure they load
+            const productsData = await getLocalPOSData.getProductsWithRetry(3, 500);
+            
+            if (productsData && productsData.length > 0) {
+              console.log(`Found ${productsData.length} products in local database`);
+              
+              // Filter products to only include those with pos_categ_ids field
+              const filteredProducts = productsData.filter(product => {
+                return product && product.pos_categ_ids && Array.isArray(product.pos_categ_ids) && product.pos_categ_ids.length > 0;
+              });
+              
+              console.log(`Filtered to ${filteredProducts.length} products with pos_categ_ids`);
+              
+              setProducts(filteredProducts);
+              setFilteredProducts(filteredProducts);
+            } else {
+              console.warn('No products found in local database');
+              setProducts([]);
+              setFilteredProducts([]);
+              
+              toast({
+                title: 'No Products Available',
+                description: 'No products found in local database. Make sure data is loaded properly.',
+                status: 'warning',
+                duration: 5000,
+                isClosable: true,
+              });
+            }
+          } catch (error) {
+            console.error('Error loading products from local database:', error);
+            setProducts([]);
+            setFilteredProducts([]);
+            
+            toast({
+              title: 'Error Loading Products',
+              description: 'Could not load products from local database.',
+              status: 'error',
+              duration: 5000,
+              isClosable: true,
+            });
+          } finally {
+            setIsLoading(false);
+          }
+        };
+        
+        loadProducts();
+      }
+    }
+  }, [activePOSSession, categories.length]);
+
+  // Add an effect to reload products with a delay after loading data
+  useEffect(() => {
+    if (activePOSSession) {
+      // Schedule a delayed reload of products to ensure IndexedDB is ready
+      const timer = setTimeout(async () => {
+        console.log('Delayed reload of products from IndexedDB...');
+        
+        try {
+          const productsData = await getLocalPOSData.getProducts();
+          
+          if (productsData && productsData.length > 0) {
+            console.log(`Found ${productsData.length} products in delayed reload`);
+            
+            // Filter products to only include those with pos_categ_ids field
+            const filteredProducts = productsData.filter(product => {
+              return product && product.pos_categ_ids && Array.isArray(product.pos_categ_ids) && product.pos_categ_ids.length > 0;
+            });
+            
+            console.log(`Filtered to ${filteredProducts.length} products with pos_categ_ids in delayed reload`);
+            
+            setProducts(filteredProducts);
+            setFilteredProducts(filteredProducts);
+            
+            // Also check if we need to fetch categories
+            if (categories.length === 0) {
+              console.log('Categories still not loaded in delayed reload, fetching them now...');
+              await fetchCategories();
+            }
+          } else {
+            console.warn('No products found in delayed reload');
+          }
+        } catch (error) {
+          console.error('Error in delayed reload of products:', error);
+        }
+      }, 1000); // 1 second delay
+      
+      return () => clearTimeout(timer);
+    }
+  }, [activePOSSession, categories.length]);
+
+  // Create a new POS session
+  const handleCreateSession = async () => {
+    if (!selectedConfig) {
+      toast({
+        title: 'خطا',
+        description: 'لطفاً یک پیکربندی POS انتخاب کنید',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+      return;
+    }
+    
+    // Use the handleOpenSession function to create or connect to a session
+    await handleOpenSession(selectedConfig);
+  };
+
+  // Filter products based on search and category
+  useEffect(() => {
+    let filtered = [...products];
+    
+    // Filter by search text
+    if (searchText) {
+      const searchLower = searchText.toLowerCase();
+      filtered = filtered.filter(
+        product => 
+          product.name.toLowerCase().includes(searchLower) || 
+          (product.default_code && product.default_code.toLowerCase().includes(searchLower)) ||
+          (product.barcode && product.barcode.toLowerCase().includes(searchLower))
+      );
+    }
+    
+    // Filter by category
+    if (selectedCategory) {
+      console.log('Filtering by category:', selectedCategory);
+      filtered = filtered.filter(product => {
+        // Check if product has the selected category in pos_categ_ids array
+        if (product && product.pos_categ_ids && Array.isArray(product.pos_categ_ids)) {
+          const hasCategory = product.pos_categ_ids.includes(selectedCategory);
+          console.log('Product:', product.name, 'pos_categ_ids:', product.pos_categ_ids, 'has category:', hasCategory);
+          return hasCategory;
+        }
+        return false;
+      });
+      console.log('Filtered products count:', filtered.length);
+    }
+    
+    setFilteredProducts(filtered);
+  }, [products, searchText, selectedCategory, categories]);
+
+  // Handler for adding a product to cart
+  const handleAddToCart = (product) => {
+    // Only add to cart if we have an active order
+    if (!orderId) {
+      toast({
+        title: 'No Active Order',
+        description: 'Please select or create an order first',
+        status: 'warning',
+        duration: 2000,
+        isClosable: true,
+      });
+      return;
+    }
+    
+    // Create a variable to track if this is a new item or existing one
+    let isNewItem = false;
+    let updatedCart = [];
+    
+    setCart(prevCart => {
+      // Check if product already exists in cart
+      const existingItem = prevCart.find(item => item.id === product.id);
+      
+      if (existingItem) {
+        // Update quantity if already in cart
+        updatedCart = prevCart.map(item => 
+          item.id === product.id
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
+        );
+      } else {
+        // Add new item to cart
+        isNewItem = true;
+        updatedCart = [...prevCart, {
+          id: product.id,
+          name: product.name,
+          price: product.list_price || product.lst_price || 0,
+          quantity: 1,
+          product_id: product.id,
+        }];
+      }
+      
+      return updatedCart;
+    });
+    
+    // Set focus on this item using the new function after a small delay
+    // to ensure DOM is updated with the new cart item
+    setTimeout(() => {
+      if (window.focusCartItem) {
+        window.focusCartItem(product.id);
+        console.log(`[CART] Setting focus on product ID: ${product.id}, isNewItem: ${isNewItem}`);
+      }
+    }, 100);
+    
+    toast({
+      title: 'Added to Cart',
+      description: `${product.name} has been added to Order #${orderId}`,
+      status: 'success',
+      duration: 2000,
+      isClosable: true,
+    });
+  };
+
+  // Handler for updating item quantity in cart
+  const handleUpdateQuantity = (itemId, newQuantity) => {
+    if (newQuantity <= 0) {
+      handleRemoveItem(itemId);
+      return;
+    }
+    
+    setCart(prevCart => 
+      prevCart.map(item => 
+        item.id === itemId
+          ? { ...item, quantity: newQuantity }
+          : item
+      )
+    );
+  };
+
+  // Handler for removing item from cart
+  const handleRemoveItem = (itemId) => {
+    // Before removing, find the current index of the item
+    const currentIndex = cart.findIndex(item => item.id === itemId);
+    let nextFocusId = null;
+    
+    // If this is the only item, no need to change focus
+    if (cart.length > 1) {
+      // Determine which item to focus next (prefer previous item)
+      if (currentIndex > 0) {
+        // Focus the previous item
+        nextFocusId = cart[currentIndex - 1].id;
+      } else if (currentIndex === 0 && cart.length > 1) {
+        // If it's the first item, focus the next one
+        nextFocusId = cart[1].id;
+      }
+    }
+    
+    // Remove the item from cart
+    setCart(prevCart => prevCart.filter(item => item.id !== itemId));
+    
+    // Set focus on the determined item after a short delay to allow DOM update
+    if (nextFocusId) {
+      setTimeout(() => {
+        if (window.cartState && typeof window.cartState.focusedItemId !== 'undefined') {
+          window.cartState.focusedItemId = nextFocusId;
+          // Trigger focus change event
+          window.dispatchEvent(new CustomEvent('cartItemFocus'));
+        }
+      }, 50);
+    }
+    
+    toast({
+      title: 'Item Removed',
+      description: 'Item has been removed from cart',
+      status: 'info',
+      duration: 2000,
+      isClosable: true,
+    });
+  };
+
+  // Handler for updating discount on cart item
+  const handleUpdateDiscount = (itemId, newDiscount) => {
+    setCart(prevCart => 
+      prevCart.map(item => 
+        item.id === itemId
+          ? { ...item, discount: newDiscount }
+          : item
+      )
+    );
+  };
+
+  // Calculate cart total
+  const cartTotal = cart.reduce(
+    (total, item) => {
+      const priceAfterDiscount = item.price * (1 - (item.discount || 0) / 100);
+      return total + (priceAfterDiscount * item.quantity);
+    },
+    0
+  );
+
+  // آپدیت کردن تابع handleCreateOrder برای استفاده از مشتری انتخاب شده
+  const handleCreateOrder = async (paymentType = 'cash') => {
+    if (cart.length === 0) {
+      toast({
+        title: 'Empty Cart',
+        description: 'Please add products to cart before processing payment',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      });
+      return;
+    }
+    
+    // Open payment screen instead of direct processing
+    handleOpenPaymentScreen(paymentType);
+  };
+
+  // Function to close a specific session
+  const handleCloseSession = async (sessionId) => {
+    try {
+      setSessionActionInProgress(true);
+      const result = await sessionManager.closeSession(sessionId);
+      
+      if (result) {
+        toast({
+          title: 'موفقیت',
+          description: `سشن با موفقیت بسته شد`,
+          status: 'success',
+          duration: 3000,
+          isClosable: true,
+        });
+        
+        // Refresh sessions list
+        fetchActiveSessions();
+        
+        // If the closed session was the active one, clear active session
+        if (activePOSSession && activePOSSession.id === sessionId) {
+          setActivePOSSession(null);
+        }
+      } else {
+        toast({
+          title: 'خطا',
+          description: 'بستن سشن با خطا مواجه شد',
+          status: 'error',
+          duration: 3000,
+          isClosable: true,
+        });
+      }
+    } catch (error) {
+      console.error('Error closing session:', error);
+      toast({
+        title: 'خطا',
+        description: error.message || 'خطا در بستن سشن. ممکن است شما اجازه بستن این سشن را نداشته باشید.',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setSessionActionInProgress(false);
+    }
+  };
+  
+  // Function to close all sessions
+  const handleCloseAllSessions = async () => {
+    try {
+      setSessionActionInProgress(true);
+      const results = await sessionManager.closeAllSessions();
+      
+      // اگر پیام خاصی وجود داشت
+      if (results.message) {
+        toast({
+          title: 'اطلاعات',
+          description: results.message,
+          status: 'info',
+          duration: 3000,
+          isClosable: true,
+        });
+        return;
+      }
+      
+      if (results.closed > 0) {
+        toast({
+          title: 'سشن‌ها بسته شدند',
+          description: `تعداد ${results.closed} سشن با موفقیت بسته شد.`,
+          status: 'success',
+          duration: 3000,
+          isClosable: true,
+        });
+        
+        // اگر سشن فعال بسته شد، آن را پاک کنیم
+        if (activePOSSession && results.sessionDetails && 
+            results.sessionDetails.some(s => s.id === activePOSSession.id && s.success)) {
+          setActivePOSSession(null);
+        }
+      }
+      
+      if (results.failed > 0) {
+        toast({
+          title: 'هشدار',
+          description: `تعداد ${results.failed} سشن را نتوانستیم ببندیم.`,
+          status: 'warning',
+          duration: 5000,
+          isClosable: true,
+        });
+      }
+      
+      // Refresh sessions list
+      fetchActiveSessions();
+    } catch (error) {
+      console.error('Error closing all sessions:', error);
+      toast({
+        title: 'خطا',
+        description: error.message || 'خطا در بستن سشن‌ها',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setSessionActionInProgress(false);
+    }
+  };
+
+  // Session management modal
+  const SessionManagementModal = ({ isOpen, onClose }) => {
+    // Handler to auto-connect to existing session
+    const handleAutoConnect = async () => {
+      try {
+        setSessionActionInProgress(true);
+        
+        // Try to find the first available POS config
+        if (posConfigs.length === 0) {
+          toast({
+            title: 'خطا',
+            description: 'هیچ پیکربندی POS در دسترس نیست',
+            status: 'error',
+            duration: 3000,
+            isClosable: true,
+          });
+          return;
+        }
+        
+        // Try each config in order
+        for (const config of posConfigs) {
+          const existingSession = await sessionManager.getExistingSessionByConfig(config.id);
+          if (existingSession) {
+            console.log(`Auto-connecting to existing session for config ${config.name}:`, existingSession);
+            setActivePOSSession(existingSession);
+            toast({
+              title: 'اتصال موفق',
+              description: `اتصال به سشن موجود: ${existingSession.name}`,
+              status: 'success',
+              duration: 3000,
+              isClosable: true,
+            });
+            
+            onClose();
+            return;
+          }
+        }
+        
+        toast({
+          title: 'سشنی یافت نشد',
+          description: 'هیچ سشن موجودی برای کاربر فعلی یافت نشد',
+          status: 'warning',
+          duration: 3000,
+          isClosable: true,
+        });
+        
+      } catch (error) {
+        console.error('Error auto-connecting to session:', error);
+        toast({
+          title: 'خطا',
+          description: error.message || 'خطا در اتصال به سشن موجود',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        });
+      } finally {
+        setSessionActionInProgress(false);
+      }
+    };
+    
+    // Get current user info to determine ownership
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    const userId = currentUser.uid || 1;
+    
+    return (
+      <Modal isOpen={isOpen} onClose={onClose} size="xl">
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>مدیریت سشن‌ها</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <VStack spacing={4} align="stretch">
+              <Button
+                colorScheme="blue"
+                leftIcon={<FiSettings />}
+                onClick={handleAutoConnect}
+                isLoading={sessionActionInProgress}
+                isDisabled={sessionActionInProgress}
+              >
+                اتصال خودکار به سشن موجود
+              </Button>
+              
+              <Divider />
+              
+              <Heading size="sm">سشن‌های فعال</Heading>
+              {loadingSessions ? (
+                <Flex justify="center" p={4}>
+                  <Spinner size="md" />
+                </Flex>
+              ) : sessions.length > 0 ? (
+                <Table size="sm">
+                  <Thead>
+                    <Tr>
+                      <Th>نام</Th>
+                      <Th>پیکربندی POS</Th>
+                      <Th>وضعیت</Th>
+                      <Th>مالک</Th>
+                      <Th>عملیات</Th>
+                    </Tr>
+                  </Thead>
+                  <Tbody>
+                    {sessions.map(session => (
+                      <Tr key={session.id} bg={session.isOwnedByCurrentUser ? "blue.50" : undefined}>
+                        <Td>{session.name}</Td>
+                        <Td>{session.config_id ? session.config_id[1] : 'نامشخص'}</Td>
+                        <Td>
+                          <Badge
+                            colorScheme={
+                              session.state === 'opened' ? 'green' : 
+                              session.state === 'opening_control' ? 'blue' : 
+                              session.state === 'closing_control' ? 'orange' : 'gray'
+                            }
+                          >
+                            {session.state === 'opened' ? 'باز' : 
+                             session.state === 'opening_control' ? 'در حال باز شدن' :
+                             session.state === 'closing_control' ? 'در حال بسته شدن' : session.state}
+                          </Badge>
+                        </Td>
+                        <Td>
+                          {session.isOwnedByCurrentUser ? 
+                            <Badge colorScheme="green">شما</Badge> : 
+                            <Badge>کاربر دیگر</Badge>
+                          }
+                        </Td>
+                        <Td>
+                          <HStack spacing={2}>
+                            <Button
+                              size="xs"
+                              colorScheme="blue"
+                              onClick={() => {
+                                // Only allow using own sessions
+                                if (session.isOwnedByCurrentUser) {
+                                  setActivePOSSession(session);
+                                  onClose();
+                                  toast({
+                                    title: 'سشن انتخاب شد',
+                                    description: `استفاده از سشن: ${session.name}`,
+                                    status: 'success',
+                                    duration: 3000,
+                                    isClosable: true,
+                                  });
+                                } else {
+                                  toast({
+                                    title: 'خطا',
+                                    description: 'شما فقط می‌توانید از سشن‌های خودتان استفاده کنید',
+                                    status: 'error',
+                                    duration: 3000,
+                                    isClosable: true,
+                                  });
+                                }
+                              }}
+                              isDisabled={!session.isOwnedByCurrentUser}
+                            >
+                              استفاده
+                            </Button>
+                            <Button
+                              size="xs"
+                              colorScheme="red"
+                              onClick={() => handleCloseSession(session.id)}
+                              isDisabled={sessionActionInProgress || !session.isOwnedByCurrentUser}
+                            >
+                              بستن
+                            </Button>
+                          </HStack>
+                        </Td>
+                      </Tr>
+                    ))}
+                  </Tbody>
+                </Table>
+              ) : (
+                <Text>هیچ سشن فعالی یافت نشد</Text>
+              )}
+              
+              <Divider />
+              
+              <HStack spacing={4}>
+                <Button
+                  colorScheme="blue"
+                  leftIcon={<FiSettings />}
+                  onClick={fetchActiveSessions}
+                  isLoading={loadingSessions}
+                  isDisabled={sessionActionInProgress}
+                >
+                  بارگذاری مجدد سشن‌ها
+                </Button>
+                
+                <Button 
+                  colorScheme="red" 
+                  onClick={handleCloseAllSessions}
+                  isLoading={sessionActionInProgress}
+                  isDisabled={sessionActionInProgress || !sessions.some(s => s.isOwnedByCurrentUser)}
+                  title={sessions.some(s => s.isOwnedByCurrentUser) ? 
+                    "بستن همه سشن‌های متعلق به شما" : 
+                    "شما هیچ سشن فعالی ندارید که بتوانید ببندید"}
+                >
+                  بستن سشن‌های من
+                </Button>
+              </HStack>
+              
+              <Box mt={2} p={3} bg="yellow.50" borderRadius="md">
+                <Text fontSize="sm" fontWeight="bold">راهنما:</Text>
+                <Text fontSize="sm">• سشن‌های با زمینه آبی متعلق به شما هستند</Text>
+                <Text fontSize="sm">• فقط می‌توانید از سشن‌های خودتان استفاده کنید</Text>
+                <Text fontSize="sm">• فقط می‌توانید سشن‌های خودتان را ببندید</Text>
+              </Box>
+            </VStack>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" onClick={onClose}>بستن</Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+    );
+  };
+
+  // Generate consistent colors for categories
+  useEffect(() => {
+    if (categories.length > 0) {
+      const colors = {};
+      const colorPalette = {
+        // Using more vibrant colors for categories
+        "Upper body": "rgba(255, 153, 102, 0.5)",  // Bright orange
+        "Lower body": "rgba(102, 204, 153, 0.5)",  // Bright green
+        "Others": "rgba(179, 179, 179, 0.5)",      // Gray
+        // Fallback colors for other categories - more vibrant
+        "default": [
+          "rgba(255, 204, 0, 0.5)",    // Bright yellow
+          "rgba(51, 153, 255, 0.5)",   // Bright blue
+          "rgba(204, 102, 255, 0.5)",  // Bright purple
+          "rgba(255, 102, 102, 0.5)",  // Bright red
+          "rgba(102, 255, 153, 0.5)",  // Bright mint green
+          "rgba(255, 102, 204, 0.5)",  // Bright pink
+          "rgba(0, 204, 204, 0.5)"     // Bright cyan
+        ]
+      };
+      
+      categories.forEach((category, index) => {
+        // Try to match category by name first
+        const categoryName = category.name || '';
+        if (Object.keys(colorPalette).includes(categoryName)) {
+          colors[category.id] = colorPalette[categoryName];
+        } else {
+          // Use default color palette
+          colors[category.id] = colorPalette.default[index % colorPalette.default.length];
+        }
+        
+        // Store color in the category's own color field if it exists
+        if (category.color) {
+          try {
+            // If the category already has a color defined in the database, use that
+            const colorValue = parseInt(category.color);
+            if (!isNaN(colorValue) && colorValue > 0) {
+              // Convert Odoo numeric color to a hex color - simplified approach
+              const hue = (colorValue % 10) * 36; // 0-9 mapped to 0-324 degrees
+              colors[category.id] = `hsla(${hue}, 70%, 60%, 0.5)`;
+            }
+          } catch (e) {
+            console.log('Error parsing category color:', e);
+          }
+        }
+      });
+      
+      console.log('Setting category colors:', colors);
+      setCategoryColors(colors);
+    }
+  }, [categories]);
+
+  // Determine product category color
+  const getProductCategoryColor = (product) => {
+    if (!product) return "white";
+    
+    // Use pos_categ_ids (new field) instead of categ_id
+    if (product.pos_categ_ids && Array.isArray(product.pos_categ_ids) && product.pos_categ_ids.length > 0) {
+      const categoryId = product.pos_categ_ids[0];
+      const color = categoryColors[categoryId] || "white";
+      
+      // Debug info
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`Product ${product.name} (ID: ${product.id}) has POS category ID ${categoryId} with color ${color}`);
+      }
+      
+      return color;
+    }
+    
+    // Fallback to white if no pos_categ_ids
+    return "white";
+  };
+
+  // Get current user from localStorage for the header
+  const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+  
+  // Category Management Functions
+  const handleAddCategory = async () => {
+    if (!newCategoryName.trim()) {
+      toast({
+        title: 'نام دسته‌بندی الزامی است',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+      return;
+    }
+
+    setIsAddingCategory(true);
+      
+    try {
+      let categoryData = {
+        name: newCategoryName,
+        color: categoryColor || '#FFFFFF' // Add the color to category data
+      };
+      
+      if (categoryImage) {
+        const base64 = await getBase64(categoryImage);
+        // Remove the data URL prefix
+        const imageData = base64.split(',')[1];
+        categoryData.image_1920 = imageData;
+      }
+      
+      // Still need to call server API to create the category
+      const response = await categoryService.createCategory(categoryData);
+      
+      if (response) {
+        toast({
+          title: 'دسته‌بندی با موفقیت اضافه شد',
+          status: 'success',
+          duration: 3000,
+          isClosable: true,
+        });
+        
+        // First reload data to IndexedDB to ensure it's up-to-date
+        const sessionId = localStorage.getItem('current_session_id');
+        if (sessionId) {
+          // Only reload the pos.category model
+          await loadPOSData(sessionId, true, 'pos.category');
+          console.log('Reloaded category data from server to IndexedDB');
+        }
+        
+        // Now refresh categories from local database
+        await fetchCategories();
+        
+        // Update category colors map
+        if (response.id) {
+          const updatedCategoryColors = {...categoryColors};
+          updatedCategoryColors[response.id] = categoryColor || '#FFFFFF';
+          setCategoryColors(updatedCategoryColors);
+        }
+        
+        // Reset form
+        setNewCategoryName('');
+        setCategoryImage(null);
+        setPreviewImage('');
+        setCategoryColor('#FFFFFF');
+      }
+    } catch (error) {
+      console.error('Error adding category:', error);
+      toast({
+        title: 'خطا در افزودن دسته‌بندی',
+        description: error.message || 'لطفاً مجدد تلاش کنید',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsAddingCategory(false);
+    }
+  };
+
+  // به‌روزرسانی دسته‌بندی
+  const handleUpdateCategory = async () => {
+    if (!editingCategory) return;
+    
+    if (!newCategoryName.trim()) {
+      toast({
+        title: 'نام دسته‌بندی الزامی است',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+      return;
+    }
+
+    setIsUpdatingCategory(true);
+      
+    try {
+      let categoryData = {
+        name: newCategoryName,
+        color: categoryColor || '#FFFFFF' // Add the color to category data
+      };
+      
+      if (categoryImage) {
+        const base64 = await getBase64(categoryImage);
+        // Remove the data URL prefix
+        const imageData = base64.split(',')[1];
+        categoryData.image_1920 = imageData;
+      }
+      
+      // Still need to call server API to update the category
+      const response = await categoryService.updateCategory(editingCategory.id, categoryData);
+      
+      if (response) {
+        toast({
+          title: 'دسته‌بندی با موفقیت به‌روزرسانی شد',
+          status: 'success',
+          duration: 3000,
+          isClosable: true,
+        });
+        
+        // First reload data to IndexedDB to ensure it's up-to-date
+        const sessionId = localStorage.getItem('current_session_id');
+        if (sessionId) {
+          // Only reload the pos.category model
+          await loadPOSData(sessionId, true, 'pos.category');
+          console.log('Reloaded category data from server to IndexedDB after update');
+        }
+        
+        // Now refresh categories from local database
+        await fetchCategories();
+        
+        // Update category colors map
+        const updatedCategoryColors = {...categoryColors};
+        updatedCategoryColors[editingCategory.id] = categoryColor || '#FFFFFF';
+        setCategoryColors(updatedCategoryColors);
+        
+        // Reset form and editing state
+        setNewCategoryName('');
+        setEditingCategory(null);
+        setCategoryImage(null);
+        setPreviewImage('');
+        setCategoryColor('#FFFFFF');
+      }
+    } catch (error) {
+      console.error('Error updating category:', error);
+      toast({
+        title: 'خطا در به‌روزرسانی دسته‌بندی',
+        description: error.message || 'لطفاً مجدد تلاش کنید',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsUpdatingCategory(false);
+    }
+  };
+
+  const handleDeleteCategory = async () => {
+    if (!categoryToDelete) return;
+
+    try {
+      setIsDeletingCategory(true);
+      
+      // Still need to call server API to delete the category
+      const result = await categoryService.deleteCategory(categoryToDelete.id);
+      
+      if (result) {
+        // First reload data to IndexedDB to ensure it's up-to-date
+        const sessionId = localStorage.getItem('current_session_id');
+        if (sessionId) {
+          // Only reload the pos.category model
+          await loadPOSData(sessionId, true, 'pos.category');
+          console.log('Reloaded category data from server to IndexedDB after deletion');
+        }
+        
+        // Now refresh categories from local database
+        await fetchCategories();
+        
+        toast({
+          title: 'موفقیت',
+          description: 'دسته‌بندی با موفقیت حذف شد',
+          status: 'success',
+          duration: 3000,
+          isClosable: true,
+        });
+        
+        // Reset state
+        setCategoryToDelete(null);
+      }
+    } catch (error) {
+      console.error('Error deleting category:', error);
+      toast({
+        title: 'خطا',
+        description: error.message || 'حذف دسته‌بندی با خطا مواجه شد',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsDeletingCategory(false);
+    }
+  };
+
+  // Categories Management Modal component
+  const CategoriesManagementModal = ({ isOpen, onClose }) => {
+    const resetCategoryForm = () => {
+      setNewCategoryName('');
+      setCategoryImage(null);
+      setPreviewImage('');
+      setEditingCategory(null);
+      setCategoryColor('#FFFFFF'); // Reset color to white
+    };
+
+    // Reset form when modal is closed
+    useEffect(() => {
+      if (!isOpen) {
+        resetCategoryForm();
+      }
+    }, [isOpen]);
+    
+    const bgHover = useColorModeValue("gray.50", "gray.700");
+    
+    // آماده‌سازی فیلدها برای ویرایش
+    const handleEditClick = (category) => {
+      setEditingCategory(category);
+      setNewCategoryName(category.name || '');
+      setPreviewImage(category.image_128 ? `data:image/png;base64,${category.image_128}` : '');
+      // Set the category color if available, otherwise default to white
+      setCategoryColor(categoryColors[category.id] || '#FFFFFF');
+    };
+    
+    // آماده‌سازی برای حذف
+    const handleDeleteClick = (category) => {
+      setCategoryToDelete(category);
+    };
+    
+    // مدیریت آپلود تصویر
+    const handleImageChange = (e) => {
+      e.preventDefault(); // Prevent default form submission
+      const file = e.target.files[0];
+      if (file) {
+        setCategoryImage(file);
+        
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setPreviewImage(reader.result);
+        };
+        reader.readAsDataURL(file);
+      }
+    };
+    
+    // شمارش محصولات هر دسته‌بندی
+    const countProductsByCategory = (categoryId) => {
+      return products.filter(product => 
+        product.categ_id && product.categ_id[0] === categoryId
+      ).length;
+    };
+    
+    return (
+      <Modal
+        isOpen={isOpen}
+        onClose={onClose}
+        size="xl"
+      >
+        <ModalOverlay />
+        <ModalContent maxW="900px">
+          <ModalHeader>
+            <Flex align="center" justify="space-between">
+              <Text>مدیریت دسته‌بندی‌ها (Odoo 18)</Text>
+              <Button size="sm" leftIcon={<FiRefreshCw />} onClick={async () => {
+                try {
+                  // Only use local database to get categories, no server fallback
+                  const localCategories = await getLocalPOSData.getCategories();
+                  if (localCategories && localCategories.length > 0) {
+                    setCategories(localCategories);
+                    toast({
+                      title: 'به‌روزرسانی',
+                      description: 'لیست دسته‌بندی‌ها از پایگاه داده محلی به‌روزرسانی شد',
+                      status: 'success',
+                      duration: 2000,
+                      isClosable: true,
+                    });
+                  } else {
+                    setCategories([]);
+                    toast({
+                      title: 'هشدار',
+                      description: 'هیچ دسته‌بندی در پایگاه داده محلی یافت نشد',
+                      status: 'warning',
+                      duration: 3000,
+                      isClosable: true,
+                    });
+                  }
+                } catch (error) {
+                  console.error('Error refreshing categories from local database:', error);
+                  toast({
+                    title: 'خطا',
+                    description: 'بارگذاری دسته‌بندی‌ها از پایگاه داده محلی با خطا مواجه شد',
+                    status: 'error',
+                    duration: 3000,
+                    isClosable: true,
+                  });
+                }
+              }}>
+                بارگذاری مجدد
+              </Button>
+            </Flex>
+          </ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <VStack spacing={6} align="stretch">
+              {/* Add/Edit category form */}
+              <Box p={5} borderWidth="1px" borderRadius="md" bg="white" shadow="sm">
+                <Heading size="sm" mb={4}>
+                  {editingCategory ? 'ویرایش دسته‌بندی' : 'افزودن دسته‌بندی جدید'}
+                </Heading>
+                
+                <form onSubmit={(e) => {
+                  e.preventDefault(); // Always prevent default form submission
+                  if (editingCategory) {
+                    handleUpdateCategory();
+                  } else {
+                    handleAddCategory();
+                  }
+                }}>
+                  <Flex direction="column" gap={4}>
+                    <FormControl isRequired>
+                      <FormLabel>نام دسته‌بندی</FormLabel>
+                    <Input
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                        placeholder="نام دسته‌بندی را وارد کنید" 
+                        disabled={isAddingCategory || isUpdatingCategory}
+                    />
+                  </FormControl>
+                    
+                    <FormControl>
+                      <FormLabel>رنگ دسته‌بندی</FormLabel>
+                      <Input 
+                        type="color" 
+                        value={categoryColor || "#FFFFFF"}
+                        onChange={(e) => setCategoryColor(e.target.value)}
+                        width="100px"
+                        disabled={isAddingCategory || isUpdatingCategory}
+                      />
+                    </FormControl>
+
+                    <FormControl>
+                      <FormLabel>تصویر دسته‌بندی (اختیاری)</FormLabel>
+                      <Input 
+                        type="file" 
+                        accept="image/*"
+                        onChange={handleImageChange}
+                        disabled={isAddingCategory || isUpdatingCategory}
+                      />
+                      {previewImage && (
+                        <Box mt={2}>
+                          <Image 
+                            src={previewImage} 
+                            alt="Category preview" 
+                            maxHeight="100px" 
+                            borderRadius="md"
+                          />
+                        </Box>
+                      )}
+                    </FormControl>
+                    
+                    <Flex justifyContent="flex-end" gap={2} mt={2}>
+                      <Button
+                        colorScheme="gray" 
+                        mr={3} 
+                        onClick={(e) => {
+                          e.preventDefault();
+                          resetCategoryForm();
+                        }}
+                        disabled={isAddingCategory || isUpdatingCategory}
+                      >
+                        پاک کردن فرم
+                      </Button>
+                    <Button
+                        colorScheme="blue" 
+                        type="submit"
+                        isLoading={editingCategory ? isUpdatingCategory : isAddingCategory}
+                        loadingText={editingCategory ? "در حال به‌روزرسانی..." : "در حال افزودن..."}
+                        disabled={!newCategoryName.trim() || isAddingCategory || isUpdatingCategory}
+                      >
+                        {editingCategory ? 'ویرایش دسته‌بندی' : 'افزودن دسته‌بندی'}
+                    </Button>
+                    </Flex>
+                  </Flex>
+                </form>
+              </Box>
+              
+              {/* Categories list */}
+              <Box p={5} borderWidth="1px" borderRadius="md" bg="white" shadow="sm">
+                <Heading size="sm" mb={4}>دسته‌بندی‌های موجود</Heading>
+                
+                {categories.length > 0 ? (
+                  <Table variant="simple" size="sm">
+                    <Thead bg="gray.50">
+                      <Tr>
+                        <Th>تصویر</Th>
+                        <Th>نام دسته‌بندی</Th>
+                        <Th isNumeric>تعداد محصولات</Th>
+                        <Th>رنگ</Th>
+                        <Th>عملیات</Th>
+                      </Tr>
+                    </Thead>
+                    <Tbody>
+                  {categories.map(category => (
+                        <Tr key={category.id} _hover={{ bg: bgHover }}>
+                          <Td width="80px">
+                            {category.image_128 ? (
+                              <Image 
+                                src={`data:image/png;base64,${category.image_128}`}
+                                alt={category.name}
+                                boxSize="50px"
+                                objectFit="contain"
+                                borderRadius="md"
+                              />
+                            ) : (
+                              <Box
+                                width="50px"
+                                height="50px"
+                                bg="gray.100"
+                                borderRadius="md"
+                                display="flex"
+                                alignItems="center"
+                                justifyContent="center"
+                              >
+                                <FiList size="20px" color="gray" />
+                              </Box>
+                            )}
+                          </Td>
+                          <Td fontWeight="medium">{category.name}</Td>
+                          <Td isNumeric>
+                            <Badge colorScheme="blue">
+                              {countProductsByCategory(category.id)}
+                            </Badge>
+                          </Td>
+                          <Td>
+                            <Box 
+                              w="30px" 
+                              h="30px" 
+                              borderRadius="md" 
+                              bg={categoryColors[category.id] || "gray.200"}
+                            />
+                          </Td>
+                          <Td>
+                            <HStack spacing={2}>
+                              <IconButton
+                                size="sm"
+                                colorScheme="blue"
+                                icon={<FiEdit />}
+                                aria-label="Edit category"
+                                onClick={() => handleEditClick(category)}
+                                isDisabled={isAddingCategory || isUpdatingCategory}
+                              />
+                              <IconButton
+                                size="sm"
+                                colorScheme="red"
+                                icon={<FiTrash2 />}
+                                aria-label="Delete category"
+                                onClick={() => handleDeleteClick(category)}
+                                isDisabled={isAddingCategory || isUpdatingCategory || 
+                                  // اگر دسته‌بندی دارای محصول است، امکان حذف نباشد
+                                  countProductsByCategory(category.id) > 0
+                                }
+                              />
+                            </HStack>
+                          </Td>
+                        </Tr>
+                      ))}
+                    </Tbody>
+                  </Table>
+                ) : (
+                  <Flex justify="center" align="center" p={5}>
+                    <Text color="gray.500">هیچ دسته‌بندی یافت نشد</Text>
+                  </Flex>
+                )}
+              </Box>
+              
+              {/* Information box */}
+              <Box p={4} bg="blue.50" borderRadius="md">
+                <VStack align="start" spacing={2}>
+                  <Heading size="sm">راهنمای دسته‌بندی‌ها در Odoo 18</Heading>
+                  <Text fontSize="sm">• امکان مدیریت دسته‌بندی‌ها در این صفحه فراهم شده است</Text>
+                  <Text fontSize="sm">• دسته‌بندی‌های دارای محصول را نمی‌توانید حذف کنید</Text>
+                  <Text fontSize="sm">• برای تغییر تصویر دسته‌بندی، آن را ویرایش کنید</Text>
+                  <Text fontSize="sm">• تغییرات ممکن است نیاز به بارگذاری مجدد صفحه داشته باشد</Text>
+                </VStack>
+                
+                <Button
+                  mt={4}
+                  onClick={() => window.location.reload()}
+                  leftIcon={<FiRefreshCw />}
+                  size="sm"
+                  colorScheme="blue"
+                >
+                  بارگذاری مجدد صفحه
+                </Button>
+              </Box>
+            </VStack>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" onClick={onClose}>بستن</Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+    );
+  };
+
+  // Delete Category Confirmation
+  const DeleteCategoryConfirmation = () => {
+    return (
+      <AlertDialog
+        isOpen={!!categoryToDelete}
+        leastDestructiveRef={cancelRef}
+        onClose={() => setCategoryToDelete(null)}
+      >
+        <AlertDialogOverlay>
+          <AlertDialogContent>
+            <AlertDialogHeader fontSize="lg" fontWeight="bold">
+              حذف دسته‌بندی
+            </AlertDialogHeader>
+
+            <AlertDialogBody>
+              آیا از حذف دسته‌بندی "{categoryToDelete?.name}" اطمینان دارید؟
+              {products.filter(p => p.categ_id && p.categ_id[0] === categoryToDelete?.id).length > 0 && (
+                <Text color="red.500" mt={2}>
+                  هشدار: این دسته‌بندی دارای محصول است و حذف آن ممکن است باعث مشکل در محصولات شود.
+                </Text>
+              )}
+            </AlertDialogBody>
+
+            <AlertDialogFooter>
+              <Button ref={cancelRef} onClick={() => setCategoryToDelete(null)}>
+                انصراف
+              </Button>
+              <Button colorScheme="red" onClick={handleDeleteCategory} ml={3} isLoading={isDeletingCategory}>
+                حذف
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
+    );
+  };
+
+  // Function to export the order as JSON
+  const exportOrder = () => {
+    try {
+      if (!cart || cart.length === 0) {
+        toast({
+          title: 'No items in cart',
+          description: 'Cannot export an empty order',
+          status: 'warning',
+          duration: 3000,
+          isClosable: true,
+        });
+        return;
+      }
+
+      // Create order data with current cart and customer info
+      const orderData = {
+        orderId,
+        timestamp: new Date().toISOString(),
+        customer: selectedCustomer || null,
+        items: cart,
+        total: cartTotal,
+        posSession: activePOSSession ? {
+          id: activePOSSession.id,
+          name: activePOSSession.name
+        } : null
+      };
+
+      // Convert to JSON and create downloadable file
+      const dataStr = JSON.stringify(orderData, null, 2);
+      const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+      
+      // Create and trigger download
+      const exportFileName = `pos-order-${orderId}-${new Date().toISOString().slice(0,10)}.json`;
+      const linkElement = document.createElement('a');
+      linkElement.setAttribute('href', dataUri);
+      linkElement.setAttribute('download', exportFileName);
+      linkElement.click();
+      
+      toast({
+        title: 'Order Exported',
+        description: `Order ${orderId} has been exported successfully`,
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      });
+      
+      console.log('Order exported:', orderData);
+    } catch (error) {
+      console.error('Error exporting order:', error);
+      toast({
+        title: 'Export Failed',
+        description: 'Failed to export order data',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    }
+  };
+
+  // Add new state to track if we're showing POS UI or session selection
+  const [showPOSUI, setShowPOSUI] = useState(false);
+  // State to track which config a session is being created for
+  const [creatingSessionForConfig, setCreatingSessionForConfig] = useState(null);
+  
+  // Session selection component
+  const SessionSelectionScreen = () => {
+    // State محلی برای لودینگ و سشن‌ها
+    const [localLoading, setLocalLoading] = useState(false);
+    
+    // Get current user info to determine ownership
+    const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+    const userId = currentUser.uid || 1;
+    
+    // تابع بارگذاری سشن‌ها به صورت محلی
+    const loadSessions = async () => {
+      try {
+        setLocalLoading(true);
+        await fetchActiveSessions();
+      } catch (error) {
+        console.error('Error loading sessions in selection screen:', error);
+      } finally {
+        setLocalLoading(false);
+      }
+    };
+    
+    // UseEffect برای loading اولیه سشن‌ها
+    useEffect(() => {
+      if (sessions.length === 0 && !loadingSessions && !loadedSessions.current) {
+        loadedSessions.current = true;
+        loadSessions();
+      }
+    }, []);
+    
+    return (
+      <Box p={4} maxW="100%" mx="auto" h="calc(100vh - 36px)" overflow="hidden" display="flex" flexDirection="column">
+        <Heading mb={2} size="lg">Point of Sale</Heading>
+        
+        {/* Search bar */}
+        <InputGroup mb={3} maxW="600px" mx="auto">
+          <InputLeftElement pointerEvents="none">
+            <FiSearch color="gray.300" />
+          </InputLeftElement>
+          <Input placeholder="جستجوی صندوق..." />
+          <Text position="absolute" right={4} top="50%" transform="translateY(-50%)">Q</Text>
+        </InputGroup>
+        
+        {/* Page indicator */}
+        <HStack justify="flex-end" mb={1}>
+          <Text>1-2 / 2</Text>
+          <IconButton icon={<FiChevronDown transform="rotate(90deg)" />} aria-label="Previous page" variant="ghost" />
+          <IconButton icon={<FiChevronDown transform="rotate(-90deg)" />} aria-label="Next page" variant="ghost" />
+          <Text>⇧+V</Text>
+        </HStack>
+        
+        <Box flex="1" overflowY="auto" mb={2}>
+          {loadingSessions || localLoading ? (
+            <Flex justify="center" align="center" p={10}>
+              <Spinner size="xl" color="blue.500" />
+            </Flex>
+          ) : (
+            <SimpleGrid columns={{ base: 2, sm: 3, md: 5, lg: 7, xl: 10 }} spacing={3}>
+              {posConfigs.map(config => {
+                // Find if there's an existing session for this config
+                const configSession = sessions.find(s => s.config_id && s.config_id[0] === config.id);
+                const isOwnedByOther = configSession && !configSession.isOwnedByCurrentUser;
+                
+                return (
+                  <Box 
+                    key={config.id} 
+                    borderWidth="1px" 
+                    borderRadius="md" 
+                    p={4}
+                    bg={configSession?.isOwnedByCurrentUser ? "blue.50" : "white"}
+                  >
+                    <Heading size="md" mb={4}>{config.name}</Heading>
+                    
+                    <Flex justify="flex-end" mb={4}>
+                      <Box textAlign="right">
+                        <Text>Closing</Text>
+                        <Text>Balance</Text>
+                        <Text>$ 0.00</Text>
+                      </Box>
+                    </Flex>
+                    
+                    <Button
+                      colorScheme="purple"
+                      size="md"
+                      onClick={() => handleOpenSession(config.id)}
+                      isLoading={creatingSessionForConfig === config.id}
+                      isDisabled={isOwnedByOther || creatingSessionForConfig !== null}
+                      width="fit-content"
+                    >
+                      Open Register
+                    </Button>
+                    
+                    {isOwnedByOther && (
+                      <Text color="red.500" fontSize="sm" mt={2}>
+                        در حال استفاده توسط کاربر دیگر
+                      </Text>
+                    )}
+                    
+                    {configSession && (
+                      <Badge
+                        mt={2}
+                        colorScheme={
+                          configSession.state === 'opened' ? 'green' : 
+                          configSession.state === 'opening_control' ? 'blue' : 
+                          configSession.state === 'closing_control' ? 'orange' : 'gray'
+                        }
+                      >
+                        {configSession.state === 'opened' ? 'باز' : 
+                        configSession.state === 'opening_control' ? 'در حال باز شدن' :
+                        configSession.state === 'closing_control' ? 'در حال بستن' : configSession.state}
+                      </Badge>
+                    )}
+                  </Box>
+                );
+              })}
+            </SimpleGrid>
+          )}
+        </Box>
+        
+        {/* دکمه برای بارگذاری مجدد سشن‌ها */}
+        <Button
+          mt={1}
+          colorScheme="blue"
+          leftIcon={<FiRefreshCw />}
+          onClick={() => {
+            loadedSessions.current = false;
+            loadSessions();
+          }}
+          isLoading={loadingSessions || localLoading}
+        >
+          بارگذاری مجدد سشن‌ها
+        </Button>
+      </Box>
+    );
+  };
+
+  // Add the handleLogout function
+  const handleLogout = async () => {
+    try {
+      // Show loading toast
+      toast({
+        title: 'خروج از حساب کاربری',
+        description: 'در حال خروج...',
+        status: 'info',
+        duration: 2000,
+        isClosable: true,
+      });
+
+      // First clear all localStorage items related to sessions and authentication
+      const itemsToRemove = [
+        'user',
+        'token',
+        'session_id',
+        'pos_active_order_id',
+        'pos_orders',
+        'current_session',
+        'odoo_session',
+        'auth_token'
+      ];
+      
+      itemsToRemove.forEach(item => localStorage.removeItem(item));
+      
+      // Call the auth service logout to properly terminate the Odoo session
+      try {
+        console.log('Calling authService.logout()...');
+        await authService.logout();
+      } catch (logoutError) {
+        console.error('Error during logout from server:', logoutError);
+      }
+      
+      // Navigate to login page
+      navigate('/login');
+    } catch (error) {
+      console.error('Error during logout:', error);
+      toast({
+        title: 'خطا',
+        description: 'خطا در خروج از حساب کاربری',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    }
+  };
+
+  // Open or create a session for a specific config
+  const handleOpenSession = async (configId) => {
+    if (creatingSessionForConfig !== null) {
+      // اگر در حال ایجاد سشن برای کانفیگ دیگری هستیم، اجازه ندهیم
+      console.log('Already creating session for config:', creatingSessionForConfig);
+      return;
+    }
+
+    // ابتدا وضعیت loading را تنظیم می‌کنیم
+    setCreatingSessionForConfig(configId);
+    
+    try {
+      // First check if there's an existing session for this config
+      console.log('Checking for existing session for config:', configId);
+      const existingSession = await sessionManager.getExistingSessionByConfig(configId);
+                        
+      if (existingSession) {
+        console.log('Found existing session:', existingSession);
+        
+        // Store the session ID in localStorage for the data loading process
+        localStorage.setItem('current_session_id', existingSession.id.toString());
+        
+        // Show a different message based on the session state
+        const stateMessages = {
+          'opened': 'استفاده از سشن فعال موجود',
+          'opening_control': 'اتصال به سشن موجود در حالت کنترل باز شدن',
+          'closing_control': 'اتصال به سشن موجود در حالت کنترل بستن'
+        };
+        
+        const message = stateMessages[existingSession.state] || 'اتصال به سشن موجود';
+        
+        // Load POS data from server to IndexedDB BEFORE setting active session
+        try {
+          setIsLoading(true);
+          console.log('Loading POS data for session:', existingSession.id);
+          const posData = await loadPOSData(existingSession.id);
+          console.log('POS data loaded and stored in IndexedDB:', posData);
+          
+          // Add a small delay to ensure IndexedDB operations have completed
+          console.log('Waiting for IndexedDB operations to complete...');
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Now we can load products from the local database ONLY
+          console.log('Loading products ONLY from local IndexedDB database');
+          
+          // Verify data exists in IndexedDB first
+          const dataExists = await getLocalPOSData.checkDataExists();
+          if (!dataExists) {
+            console.warn('Data verification failed - reloading data');
+            await loadPOSData(existingSession.id, true);
+            await new Promise(resolve => setTimeout(resolve, 800));
+          }
+          
+          const localProducts = await getLocalPOSData.getProductsWithRetry(5, 800);
+          
+          if (localProducts && localProducts.length > 0) {
+            console.log(`Found ${localProducts.length} products in local database`);
+            setProducts(localProducts);
+            setFilteredProducts(localProducts);
+            
+            // Fetch categories immediately after loading products
+            console.log('Fetching categories immediately after loading products...');
+            await fetchCategories();
+            
+            // Now set the active session AFTER data is loaded
+            setActivePOSSession(existingSession);
+            
+            toast({
+              title: 'اتصال موفق',
+              description: `${message}: ${existingSession.name} - داده‌های فروشگاه بارگیری شد`,
+              status: 'success',
+              duration: 3000,
+              isClosable: true,
+            });
+          } else {
+            console.warn('No products found in local database');
+            throw new Error('No products found in local database after loading');
+          }
+        } catch (error) {
+          console.error('Error loading POS data or products:', error);
+          
+          toast({
+            title: 'هشدار',
+            description: 'بارگذاری داده‌ها با خطا مواجه شد. در حال تلاش مجدد...',
+            status: 'warning',
+            duration: 5000,
+            isClosable: true,
+          });
+          
+          // Try one more time with a direct load and longer timeout
+          try {
+            console.log('Retrying data load - forced reload with delay');
+            await loadPOSData(existingSession.id, true); // Force reload
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // Try to inspect the database to see if data exists
+            await inspectDatabase();
+            
+            const retryProducts = await productService.getProducts();
+            if (retryProducts && retryProducts.length > 0) {
+              console.log(`Retry successful! Found ${retryProducts.length} products through API`);
+              setProducts(retryProducts);
+              setFilteredProducts(retryProducts);
+              
+              // Fetch categories immediately after loading products in retry path
+              console.log('Fetching categories after retry...');
+              await fetchCategories();
+              
+              // Set active session on retry success
+              setActivePOSSession(existingSession);
+              
+              toast({
+                title: 'اتصال موفق',
+                description: `${message}: ${existingSession.name} - داده‌ها با تلاش مجدد بارگیری شدند`,
+                status: 'success',
+                duration: 3000,
+                isClosable: true,
+              });
+            } else {
+              throw new Error('Retry failed - still no products found');
+            }
+          } catch (retryError) {
+            console.error('Error in retry attempt:', retryError);
+            setProducts([]);
+            setFilteredProducts([]);
+            
+            toast({
+              title: 'خطا',
+              description: 'بارگذاری داده‌ها با خطا مواجه شد. لطفا صفحه را رفرش کنید.',
+              status: 'error', 
+              duration: 5000,
+              isClosable: true,
+            });
+          }
+        } finally {
+          setIsLoading(false);
+        }
+        
+        return;
+      }
+      
+      // If no existing session, create a new one
+      console.log('No existing session found, creating new POS session for config:', configId);
+      
+      // Use sessionManager which uses the current user
+      const session = await sessionManager.createSession(configId);
+      
+      if (session) {
+        console.log('Session created successfully:', session);
+        
+        // Store the session ID in localStorage for the data loading process
+        localStorage.setItem('current_session_id', session.id.toString());
+        
+        try {
+          // Load POS data from server to IndexedDB BEFORE setting active session
+          setIsLoading(true);
+          console.log('Loading POS data for new session:', session.id);
+          const posData = await loadPOSData(session.id);
+          console.log('POS data loaded and stored in IndexedDB:', posData);
+          
+          // Add a small delay to ensure IndexedDB operations have completed
+          console.log('Waiting for IndexedDB operations to complete...');
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Now we can load products from the local database ONLY
+          console.log('Loading products ONLY from local IndexedDB database');
+          
+          // Verify data exists in IndexedDB first
+          const dataExists = await getLocalPOSData.checkDataExists();
+          if (!dataExists) {
+            console.warn('Data verification failed - reloading data');
+            await loadPOSData(session.id, true);
+            await new Promise(resolve => setTimeout(resolve, 800));
+          }
+          
+          const localProducts = await getLocalPOSData.getProductsWithRetry(5, 800);
+          
+          if (localProducts && localProducts.length > 0) {
+            console.log(`Found ${localProducts.length} products in local database`);
+            setProducts(localProducts);
+            setFilteredProducts(localProducts);
+            
+            // Fetch categories immediately after loading products in new session
+            console.log('Fetching categories for new session...');
+            await fetchCategories();
+            
+            // Now set the active session AFTER data is loaded
+            setActivePOSSession(session);
+            
+            toast({
+              title: 'موفقیت',
+              description: 'سشن POS با موفقیت ایجاد و داده‌ها بارگیری شد',
+              status: 'success',
+              duration: 3000,
+              isClosable: true,
+            });
+          } else {
+            console.warn('No products found in local database');
+            throw new Error('No products found in local database after loading');
+          }
+        } catch (error) {
+          console.error('Error loading POS data or products:', error);
+          
+          toast({
+            title: 'هشدار',
+            description: 'بارگذاری داده‌ها با خطا مواجه شد. در حال تلاش مجدد...',
+            status: 'warning',
+            duration: 5000,
+            isClosable: true,
+          });
+          
+          // Try one more time with a direct load and longer timeout
+          try {
+            console.log('Retrying data load - forced reload with delay');
+            await loadPOSData(session.id, true); // Force reload
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // Try to inspect the database to see if data exists
+            await inspectDatabase();
+            
+            const retryProducts = await productService.getProducts();
+            if (retryProducts && retryProducts.length > 0) {
+              console.log(`Retry successful! Found ${retryProducts.length} products through API`);
+              setProducts(retryProducts);
+              setFilteredProducts(retryProducts);
+              
+              // Fetch categories immediately after loading products in new session retry path
+              console.log('Fetching categories after new session retry...');
+              await fetchCategories();
+              
+              // Set active session on retry success
+              setActivePOSSession(session);
+              
+              toast({
+                title: 'موفقیت',
+                description: 'داده‌ها با تلاش مجدد بارگیری شدند',
+                status: 'success',
+                duration: 3000,
+                isClosable: true,
+              });
+            } else {
+              throw new Error('Retry failed - still no products found');
+            }
+          } catch (retryError) {
+            console.error('Error in retry attempt:', retryError);
+            setProducts([]);
+            setFilteredProducts([]);
+            
+            toast({
+              title: 'خطا',
+              description: 'بارگذاری داده‌ها با خطا مواجه شد. لطفا صفحه را رفرش کنید.',
+              status: 'error',
+              duration: 5000,
+              isClosable: true,
+            });
+          }
+        } finally {
+          setIsLoading(false);
+        }
+      } else {
+        console.error('Failed to create session');
+        toast({
+          title: 'خطا',
+          description: 'ایجاد سشن با خطا مواجه شد',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        });
+      }
+    } catch (error) {
+      console.error('Error creating session or opening existing session:', error);
+      toast({
+        title: 'خطا',
+        description: error.message || 'خطا در ایجاد یا اتصال به سشن',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      // در نهایت، وضعیت loading را پاک می‌کنیم
+      setCreatingSessionForConfig(null);
+    }
+  };
+
+  // تبدیل فایل تصویر به فرمت base64
+  const getBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        // حذف بخش "data:image/png;base64," از ابتدای نتیجه
+        const base64 = reader.result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = error => reject(error);
+    });
+  };
+  
+  // Function to fetch categories from local database only
+  const fetchCategories = async () => {
+    try {
+      console.log('Fetching categories ONLY from local IndexedDB database');
+      
+      // Get categories directly from the IndexedDB database
+      const localCategories = await getLocalPOSData.getCategories();
+      
+      if (localCategories && localCategories.length > 0) {
+        console.log(`Found ${localCategories.length} categories in local database`);
+        setCategories(localCategories);
+        return localCategories;
+      } else {
+        console.warn('No categories found in local database');
+        setCategories([]);
+        
+        toast({
+          title: 'No Categories Available',
+          description: 'No categories found in local database. Categories will be loaded when session data is refreshed.',
+          status: 'warning',
+          duration: 3000,
+          isClosable: true,
+        });
+        return [];
+      }
+    } catch (error) {
+      console.error('Error fetching categories from local database:', error);
+      setCategories([]);
+      return [];
+    }
+  };
+
+  // We'll keep this function for handling the sidebar category button
+  const handleCategoriesClick = () => {
+    onCategoriesModalOpen();
+    setPOSSidebarOpen(false);
+  };
+  
+  const handleSettingsClick = () => {
+    toast({
+      title: "تنظیمات",
+      description: "این بخش در حال توسعه است.",
+      status: "info",
+      duration: 3000,
+      isClosable: true,
+    });
+    setPOSSidebarOpen(false);
+  };
+  
+  // اضافه کردن تابع برای باز کردن مودال مشتریان و بستن ساید بار
+  const handleCustomersClick = () => {
+    onCustomersModalOpen();
+    setPOSSidebarOpen(false);
+  };
+  
+  // اضافه کردن تابع برای باز کردن مودال محصولات و بستن ساید بار
+  const handleProductsClick = () => {
+    onProductsModalOpen();
+    setPOSSidebarOpen(false);
+  };
+  
+  // مدیریت انتخاب مشتری
+  const handleSelectCustomer = (customer) => {
+    setSelectedCustomer(customer);
+    toast({
+      title: 'مشتری انتخاب شد',
+      description: `مشتری ${customer.name} برای فاکتور انتخاب شد`,
+      status: 'success',
+      duration: 2000,
+      isClosable: true,
+    });
+  };
+
+  // Handle removing a customer
+  const handleRemoveCustomer = () => {
+    setSelectedCustomer(null);
+  };
+  
+  // Handle order type change
+  const handleOrderTypeChange = (type) => {
+    setOrderType(type);
+    
+    // Store order type in the active order
+    try {
+      const savedOrders = JSON.parse(localStorage.getItem('pos_orders') || '[]');
+      const updatedOrders = savedOrders.map(order => 
+        order.id === orderId 
+          ? { ...order, orderType: type } 
+          : order
+      );
+      localStorage.setItem('pos_orders', JSON.stringify(updatedOrders));
+    } catch (error) {
+      console.error('Error saving order type:', error);
+    }
+  };
+  
+  // State for payment screen
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [completedOrder, setCompletedOrder] = useState(null);
+  const [isOrderCompleteOpen, setIsOrderCompleteOpen] = useState(false);
+  
+  // Handle opening payment screen
+  const handleOpenPaymentScreen = (paymentType = 'cash') => {
+    if (cart.length === 0) {
+      toast({
+        title: 'Empty Cart',
+        description: 'Please add products to cart before processing payment',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      });
+      return;
+    }
+    
+    // Use the current orderId, don't generate a new one here
+    // This ensures we are still working with the same order during payment
+    setIsPaymentModalOpen(true);
+  };
+  
+  // Handle payment completion
+  const handlePaymentComplete = (orderData) => {
+    console.log('📝 Order completed with data:', orderData);
+    setShowPaymentScreen(false);
+    
+    // Check if this is a refund order
+    const isRefundOrder = cart.some(item => item.isRefund);
+    
+    // Update the order data to indicate it's a refund if needed
+    let finalOrderData = { ...orderData };
+    
+    if (isRefundOrder) {
+      // Get the original order ID from the first refund item
+      const refundItems = cart.filter(item => item.isRefund);
+      const originalOrderId = refundItems.length > 0 ? refundItems[0].originalOrderId : null;
+      
+      finalOrderData = {
+        ...orderData,
+        is_refund: true,
+        refund_type: 'return', // or 'exchange' depending on logic
+        original_order_id: originalOrderId
+      };
+      
+      console.log('💰 Processing refund order for:', originalOrderId);
+    }
+    
+    // Complete the order (existing logic)
+    const order = {
+      id: orderId,
+      amount: orderTotal,
+      customer: selectedCustomer,
+      payment_method: orderData.paymentMethod,
+      order_type: orderType,
+      completed: true,
+      lines: cart.map(item => ({
+        product_id: item.id,
+        price: item.price,
+        qty: item.quantity,
+        discount: item.discount || 0,
+        isRefund: item.isRefund || false
+      }))
+    };
+    
+    // Create the offline order
+    offlineOrderService.saveOrderOffline({
+      id: orderId,
+      data: finalOrderData
+    }).then(savedOrder => {
+      console.log('📦 Order saved in offline storage:', savedOrder);
+      
+      // Show complete notification with correct title based on whether it's a refund
+      setCompletedOrderData({
+        id: orderId,
+        amount: orderTotal,
+        isRefund: isRefundOrder
+      });
+      setShowOrderComplete(true);
+      
+      // Clear the cart for the current tab
+      setCart([]);
+    }).catch(error => {
+      console.error('❌ Error saving order:', error);
+      toast({
+        title: 'خطا در ذخیره سفارش',
+        description: error.message,
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    });
+  };
+  
+  // Close the completed order modal and notify AppLayout
+  const handleOrderCompleteClose = () => {
+    setIsOrderCompleteOpen(false);
+    
+    // Get the completed order ID from server response, or fall back to local ID
+    // This is crucial for ensuring we close the right tab
+    const serverOrderId = completedOrder?.id;
+    const clientOrderId = orderId;
+    
+    console.log('[POSPage] Order complete dialog closed. Server order ID:', serverOrderId, 'Client order ID:', clientOrderId);
+    
+    // Dispatch an event to notify AppLayout that the order is completed
+    // First close the client-side order (the tab)
+    window.dispatchEvent(new CustomEvent('pos_order_completed', {
+      detail: { 
+        completedOrderId: clientOrderId,
+        serverOrderId: serverOrderId,
+        forceRemove: true
+      }
+    }));
+    
+    setCompletedOrder(null);
+    
+    // Create a new order tab after completing payment
+    // Let AppLayout handle this based on the event
+  };
+  
+  // ... existing code ...
+  
+  // ... existing code ...
+
+  // Debug keyboard navigation test helper
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      // Add test function to window object
+      window.testCartNavigation = () => {
+        console.log('=== TESTING CART NAVIGATION ===');
+        
+        // Step 1: Log DOM structure
+        const cartItems = document.querySelectorAll('[data-cart-item="true"]');
+        console.log(`Found ${cartItems.length} cart items`);
+        
+        if (cartItems.length === 0) {
+          console.log('No cart items found. Please add some products to cart first.');
+          return;
+        }
+        
+        // Log each cart item
+        Array.from(cartItems).forEach((el, idx) => {
+          const itemId = el.dataset.itemId;
+          const name = el.innerText.split('\n')[0]; // First line is usually the name
+          console.log(`Item ${idx}: ID=${itemId}, Name=${name}`);
+        });
+        
+        // Step 2: Try focusing the first item
+        console.log('\nTrying to focus the first item...');
+        const firstItem = cartItems[0];
+        const firstItemId = firstItem.dataset.itemId;
+        
+        if (window.cartState) {
+          console.log(`Setting focusedItemId to ${firstItemId}`);
+          window.cartState.focusedItemId = firstItemId;
+          
+          console.log('Dispatching cartItemFocus event');
+          window.dispatchEvent(new CustomEvent('cartItemFocus'));
+          
+          console.log(`Current focused item: ${window.cartState.focusedItemId}`);
+          
+          // Step 3: Create synthetic keyboard events
+          console.log('\nTesting keyboard events:');
+          
+          // Wait a bit then simulate DOWN arrow press
+          setTimeout(() => {
+            console.log('\nSimulating DOWN arrow key...');
+            const downEvent = new KeyboardEvent('keydown', {
+              key: 'ArrowDown',
+              code: 'ArrowDown',
+              keyCode: 40,
+              which: 40,
+              bubbles: true
+            });
+            
+            document.dispatchEvent(downEvent);
+            console.log(`After DOWN, focused item: ${window.cartState.focusedItemId}`);
+            
+            // Wait a bit then simulate UP arrow press
+            setTimeout(() => {
+              console.log('\nSimulating UP arrow key...');
+              const upEvent = new KeyboardEvent('keydown', {
+                key: 'ArrowUp',
+                code: 'ArrowUp',
+                keyCode: 38,
+                which: 38,
+                bubbles: true
+              });
+              
+              document.dispatchEvent(upEvent);
+              console.log(`After UP, focused item: ${window.cartState.focusedItemId}`);
+              
+              console.log('\n=== TEST COMPLETE ===');
+              console.log('If the focusedItemId did not change after UP/DOWN key presses, there is a problem with the keyboard navigation.');
+              console.log('Look for any console errors or check if event listeners are properly registered.');
+              console.log('\nTo enable detailed debug mode, click the small bug icon on any cart item.');
+            }, 500);
+          }, 500);
+        } else {
+          console.log('window.cartState is not defined. Navigation cannot work.');
+        }
+      };
+      
+      console.log('Cart navigation test helper added. Run window.testCartNavigation() in console to test.');
+    }
+    
+    return () => {
+      if (typeof window !== 'undefined') {
+        // Remove test function when component unmounts
+        delete window.testCartNavigation;
+      }
+    };
+  }, []);
+
+  // Add a new function after fetchActiveSessions to handle refund orders
+  const loadOrderForRefund = async (orderId) => {
+    try {
+      console.log('🔄 Loading order for refund:', orderId);
+      setIsLoading(true);
+      
+      // Get the order from offline storage
+      const offlineOrder = await offlineOrderService.getOrderById(orderId);
+      if (!offlineOrder) {
+        toast({
+          title: 'سفارش یافت نشد',
+          description: `سفارش با شناسه ${orderId} در سیستم یافت نشد`,
+          status: 'error',
+          duration: 3000,
+          isClosable: true,
+        });
+        setIsLoading(false);
+        return;
+      }
+      
+      console.log('📝 Found order for refund:', offlineOrder);
+      
+      // Extract order data
+      const orderData = offlineOrder.orderData?.data || {};
+      const lines = orderData.lines || [];
+      
+      // Create a refund cart from the order items
+      const refundCart = [];
+      
+      // Process each line in the order
+      lines.forEach((line, index) => {
+        if (!Array.isArray(line)) return;
+        
+        // Product details are in the third element (index 2) of each line array
+        const productDetails = line[2] || {};
+        const quantity = Number(line[1]) || 1;
+        const price = Number(productDetails.price_unit || productDetails.list_price || 0);
+        const discount = Number(productDetails.discount || 0);
+        
+        // Find the product in our products list to ensure we have all data
+        const product = products.find(p => p.id === productDetails.id);
+        
+        if (product) {
+          refundCart.push({
+            id: product.id,
+            name: product.name,
+            price: price,
+            quantity: quantity,
+            discount: discount,
+            product_id: product.id,
+            isRefund: true, // Mark as refund item
+            originalOrderId: orderId // Track which order this is refunding
+          });
+        }
+      });
+      
+      // Set customer if available in the original order
+      if (orderData.partner_id) {
+        const customerId = Array.isArray(orderData.partner_id) ? orderData.partner_id[0] : orderData.partner_id;
+        
+        // Find this customer in our database
+        const customersDB = await openDB('POSDatabase', DB_VERSION);
+        const customer = await customersDB.get('customers', customerId);
+        
+        if (customer) {
+          setSelectedCustomer(customer);
+          toast({
+            title: 'مشتری سفارش بارگذاری شد',
+            description: `${customer.name} به عنوان مشتری فعال انتخاب شد`,
+            status: 'info',
+            duration: 2000,
+            isClosable: true,
+          });
+        }
+      }
+      
+      // Set order type if available
+      if (orderData.orderType || orderData.order_type) {
+        setOrderType(orderData.orderType || orderData.order_type);
+      }
+      
+      // Replace the cart with the refund items
+      setCart(refundCart);
+      
+      // Check if we need to create a refund mode notification
+      if (refundCart.length > 0) {
+        toast({
+          title: 'حالت ریفاند/ویرایش فعال شد',
+          description: `${refundCart.length} محصول از سفارش شماره ${orderId} به سبد خرید اضافه شد`,
+          status: 'success',
+          duration: 5000,
+          isClosable: true,
+        });
+      } else {
+        toast({
+          title: 'سفارش خالی',
+          description: 'این سفارش محصولی برای ریفاند یا ویرایش ندارد',
+          status: 'warning',
+          duration: 3000,
+          isClosable: true,
+        });
+      }
+    } catch (error) {
+      console.error('❌ Error loading order for refund:', error);
+      toast({
+        title: 'خطا در بارگذاری سفارش',
+        description: error.message,
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Add this new useEffect after the existing useEffect (around line 400) that checks URL parameters
+  // for session manager, to also check for refundOrder parameter
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search);
+
+    // Check if a refundOrder parameter exists in URL
+    const refundOrderId = searchParams.get('refundOrder');
+    if (refundOrderId) {
+      // Remove the parameter from URL to avoid reloading on refresh
+      navigate('/pos', { replace: true });
+      
+      // Make sure we have an active session first
+      if (!activePOSSession) {
+        toast({
+          title: 'نیاز به سشن فعال',
+          description: 'برای ریفاند یا ویرایش سفارش، ابتدا باید یک سشن فعال داشته باشید',
+          status: 'warning',
+          duration: 5000,
+          isClosable: true,
+        });
+      } else {
+        // Load order for refund
+        loadOrderForRefund(refundOrderId);
+      }
+    }
+  }, [location, navigate]);
+
+  // Update handlePaymentComplete to handle refund orders
+  const handlePaymentComplete = (orderData) => {
+    console.log('📝 Order completed with data:', orderData);
+    setShowPaymentScreen(false);
+    
+    // Check if this is a refund order
+    const isRefundOrder = cart.some(item => item.isRefund);
+    
+    // Update the order data to indicate it's a refund if needed
+    let finalOrderData = { ...orderData };
+    
+    if (isRefundOrder) {
+      // Get the original order ID from the first refund item
+      const refundItems = cart.filter(item => item.isRefund);
+      const originalOrderId = refundItems.length > 0 ? refundItems[0].originalOrderId : null;
+      
+      finalOrderData = {
+        ...orderData,
+        is_refund: true,
+        refund_type: 'return', // or 'exchange' depending on logic
+        original_order_id: originalOrderId
+      };
+      
+      console.log('💰 Processing refund order for:', originalOrderId);
+    }
+    
+    // Complete the order (existing logic)
+    const order = {
+      id: orderId,
+      amount: orderTotal,
+      customer: selectedCustomer,
+      payment_method: orderData.paymentMethod,
+      order_type: orderType,
+      completed: true,
+      lines: cart.map(item => ({
+        product_id: item.id,
+        price: item.price,
+        qty: item.quantity,
+        discount: item.discount || 0,
+        isRefund: item.isRefund || false
+      }))
+    };
+    
+    // Create the offline order
+    offlineOrderService.saveOrderOffline({
+      id: orderId,
+      data: finalOrderData
+    }).then(savedOrder => {
+      console.log('📦 Order saved in offline storage:', savedOrder);
+      
+      // Show complete notification with correct title based on whether it's a refund
+      setCompletedOrderData({
+        id: orderId,
+        amount: orderTotal,
+        isRefund: isRefundOrder
+      });
+      setShowOrderComplete(true);
+      
+      // Clear the cart for the current tab
+      setCart([]);
+    }).catch(error => {
+      console.error('❌ Error saving order:', error);
+      toast({
+        title: 'خطا در ذخیره سفارش',
+        description: error.message,
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    });
+  };
+
+  // Update OrderComplete component to handle refund orders
+  // Add this at the end before the Return statement in the POSPage component
+  const OrderComplete = ({ isOpen, onClose, orderData }) => {
+    return (
+      <Modal isOpen={isOpen} onClose={onClose} size="md" isCentered>
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader textAlign="center">
+            {orderData.isRefund ? 'ریفاند سفارش با موفقیت انجام شد' : 'سفارش با موفقیت ثبت شد'}
+          </ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <VStack spacing={4} align="stretch">
+              <Text textAlign="center" fontSize="xl" fontWeight="bold">
+                {orderData.isRefund ? 'مبلغ ریفاند:' : 'مبلغ کل:'}
+                <Box as="span" color={orderData.isRefund ? 'red.500' : 'green.500'} ml={2}>
+                  {formatPrice(orderData.amount)}
+                </Box>
+              </Text>
+              <Text textAlign="center">
+                شماره سفارش: {orderData.id}
+              </Text>
+              <Divider />
+              <Text textAlign="center" color="gray.500">
+                {orderData.isRefund 
+                  ? 'ریفاند با موفقیت در سیستم ثبت شد و در اولین فرصت با سرور همگام‌سازی خواهد شد.' 
+                  : 'سفارش شما با موفقیت در سیستم ثبت شد و در اولین فرصت با سرور همگام‌سازی خواهد شد.'
+                }
+              </Text>
+            </VStack>
+          </ModalBody>
+          <ModalFooter>
+            <Button colorScheme="primary" mr={3} onClick={onClose} width="full">
+              بستن
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+    );
+  };
+
+    return (
+    <Box bg="gray.50" h="100vh" overflow="hidden" position="relative">
+      {isLoading ? (
+      <Flex height="100vh" alignItems="center" justifyContent="center">
+        <VStack spacing={4}>
+          <Spinner size="xl" thickness="4px" speed="0.65s" color="blue.500" />
+            <Text>Loading data, please wait...</Text>
+        </VStack>
+      </Flex>
+      ) : showPOSUI ? (
+      <Grid
+          templateColumns={{ base: "1fr", md: "3fr 1fr" }}
+        gap={2}
+        p={2}
+          h="calc(100vh - 5px)"
+          overflow="hidden"
+          position="absolute"
+          top="5px"
+          left="0"
+          right="0"
+          bottom="0"
+      >
+        {/* Products section */}
+          <GridItem bg="white" p={3} borderRadius="md" shadow="sm" display="flex" flexDirection="column" overflow="hidden">
+            {/* Category selection with horizontal scroll */}
+            <Box mb={1} overflow="hidden">
+              <Box overflowX="auto" pb={1}>
+                <Tabs variant="soft-rounded" colorScheme="blue" size="sm">
+                  <TabList whiteSpace="nowrap" width="max-content" minWidth="100%">
+                    <Tab onClick={() => setSelectedCategory(null)}>All</Tab>
+                    {categories.map(category => (
+                      <Tab 
+                        key={category.id}
+                        onClick={() => setSelectedCategory(category.id)}
+                        bg={selectedCategory === category.id ? "blue.100" : categoryColors[category.id] || undefined}
+                        _hover={{ bg: selectedCategory === category.id ? "blue.100" : "gray.100" }}
+                      >
+                        {category.name}
+                      </Tab>
+                    ))}
+                  </TabList>
+                </Tabs>
+              </Box>
+            </Box>
+            
+            {/* Products grid */}
+            <Box flex="1" overflowY="auto">
+            {isLoading ? (
+                <Flex justify="center" align="center" h="200px">
+                  <Spinner size="xl" color="blue.500" />
+              </Flex>
+            ) : filteredProducts.length > 0 ? (
+                <SimpleGrid columns={{ base: 2, sm: 3, md: 5, lg: 7, xl: 10 }} spacing={3}>
+                {filteredProducts.map(product => (
+                  <ProductItem
+                    key={product.id}
+                    product={product}
+                    onSelect={handleAddToCart}
+                    categoryColor={getProductCategoryColor(product)}
+                  />
+                ))}
+              </SimpleGrid>
+            ) : (
+              <Flex justify="center" align="center" h="100px">
+                <Text color="gray.500">No products found</Text>
+              </Flex>
+            )}
+          </Box>
+        </GridItem>
+        
+        {/* Cart section - with adjusted height for header */}
+        <GridItem bg="white" p={4} borderRadius="md" shadow="sm" display="flex" flexDirection="column" h="calc(100vh - 48px)" overflow="hidden">
+          {/* Cart header */}
+          <Flex justify="space-between" align="center" mb={2}>
+            <Heading size="md">Order #{orderId || "New"}</Heading>
+            <HStack spacing={2}>
+              <OrderType 
+                onChange={handleOrderTypeChange} 
+                initialType={orderType}
+                showLabel={false}
+              />
+            <Button
+              leftIcon={<FiUser />}
+              variant="outline"
+              onClick={onCustomerSelectorOpen}
+              colorScheme={selectedCustomer ? "blue" : "gray"}
+              size="sm"
+            >
+              {selectedCustomer ? selectedCustomer.name : "انتخاب مشتری"}
+            </Button>
+            </HStack>
+          </Flex>
+          
+          {/* Customer info if selected */}
+          {selectedCustomer && (
+            <Box mb={2} p={2} bg="blue.50" borderRadius="md">
+              <Flex justify="space-between" align="center">
+                <HStack>
+                  <FiUser />
+                  <Text fontWeight="medium">{selectedCustomer.name}</Text>
+                </HStack>
+                <IconButton
+                  size="xs"
+                  icon={<FiX />}
+                  aria-label="Remove customer"
+                  variant="ghost"
+                  onClick={handleRemoveCustomer}
+                />
+              </Flex>
+              {selectedCustomer.phone && (
+                <Text fontSize="sm" color="gray.600" mt={1}>
+                  تلفن: {selectedCustomer.phone}
+                </Text>
+              )}
+              {selectedCustomer.mobile && (
+                <Text fontSize="sm" color="gray.600" mt={1}>
+                  موبایل: {selectedCustomer.mobile}
+                </Text>
+              )}
+            </Box>
+          )}
+          
+          {/* Cart items - scrollable */}
+          <Box flex="1" overflowY="auto" mb={2}>
+            {cart.length > 0 ? (
+              <VStack spacing={1} align="stretch" divider={<Divider />}>
+                {cart.map(item => (
+                  <CartItem
+                    key={item.id}
+                    item={item}
+                    onUpdateQuantity={handleUpdateQuantity}
+                    onRemove={handleRemoveItem}
+                    onUpdateDiscount={handleUpdateDiscount}
+                  />
+                ))}
+              </VStack>
+            ) : (
+              <Flex justify="center" align="center" h="100%">
+                <Text color="gray.500">Cart is empty</Text>
+              </Flex>
+            )}
+          </Box>
+          
+          {/* Order summary - fixed at bottom */}
+          <Box>
+            <Divider mb={2} />
+            <HStack justify="space-between" mb={1}>
+              <Text>Subtotal</Text>
+              <Text fontWeight="bold">${cartTotal.toFixed(2)}</Text>
+            </HStack>
+            <HStack justify="space-between" mb={2}>
+              <Text>Tax</Text>
+              <Text fontWeight="bold">$0.00</Text>
+            </HStack>
+            <HStack justify="space-between" mb={3}>
+              <Text fontSize="lg" fontWeight="bold">Total</Text>
+              <Text fontSize="lg" fontWeight="bold" color="primary.500">
+                ${cartTotal.toFixed(2)}
+              </Text>
+            </HStack>
+            
+            {/* Action buttons */}
+            <Button
+              leftIcon={<FiDollarSign />}
+              colorScheme="green"
+              size="lg"
+              w="full"
+              isLoading={isLoading}
+              onClick={() => handleOpenPaymentScreen()}
+              isDisabled={cart.length === 0}
+              mt={1}
+              mb={4}
+            >
+              Process Payment
+            </Button>
+          </Box>
+        </GridItem>
+      </Grid>
+      ) : (
+        <SessionSelectionScreen />
+      )}
+
+      {/* Sidebar overlay - visible when sidebar is open */}
+      {posSidebarOpen && (
+        <Box
+          position="fixed"
+          top="0"
+          left="0"
+          width="250px"
+          height="100vh"
+          bg="white"
+          boxShadow="lg"
+          zIndex="5"
+          p={4}
+          transition="0.3s"
+          overflowY="auto"
+        >
+          <VStack align="stretch" spacing={4}>
+            <Heading size="md">POS Menu</Heading>
+            <Divider />
+            <Button leftIcon={<FiSettings />} variant="ghost" justifyContent="flex-start" onClick={onSessionModalOpen}>
+              POS Sessions
+            </Button>
+            <Button 
+              w="full" 
+              colorScheme="purple" 
+              variant="ghost" 
+              justifyContent="flex-start" 
+              leftIcon={<FiShoppingBag />} 
+              onClick={handleProductsClick}
+              mb={2}
+            >
+              مدیریت محصولات
+            </Button>
+            
+                <Button
+              w="full"
+              colorScheme="blue"
+              variant="ghost"
+                  justifyContent="flex-start"
+              leftIcon={<FiList />}
+              onClick={handleCategoriesClick}
+              mb={2}
+            >
+              مدیریت دسته‌بندی‌ها
+                </Button>
+                
+                  <Button
+              w="full"
+              colorScheme="teal"
+              variant="ghost"
+                    justifyContent="flex-start"
+              leftIcon={<FiUsers />}
+              onClick={handleCustomersClick}
+              mb={2}
+            >
+              مدیریت مشتریان
+                  </Button>
+              
+              <Button
+              w="full"
+              colorScheme="blue"
+              variant="ghost"
+              justifyContent="flex-start"
+              leftIcon={<FiFileText />}
+              onClick={() => navigate('/orders')}
+              mb={2}
+            >
+              مدیریت سفارش‌ها
+                  </Button>
+              
+              <Button
+              w="full"
+              colorScheme="purple"
+              variant="ghost"
+              justifyContent="flex-start"
+              leftIcon={<FiSettings />}
+              onClick={handleSettingsClick}
+              mb={2}
+            >
+              تنظیمات
+              </Button>
+            
+            <Divider />
+            <Button leftIcon={<FiLogOut />} variant="ghost" justifyContent="flex-start" colorScheme="red" onClick={handleLogout}>
+              Logout
+            </Button>
+          </VStack>
+        </Box>
+      )}
+
+      {/* Backdrop for sidebar - closes sidebar when clicked */}
+      {posSidebarOpen && (
+        <Box
+          position="fixed"
+          top="0"
+          left="0"
+          width="100vw"
+          height="100vh"
+          bg="blackAlpha.300"
+          zIndex="4"
+          onClick={() => setPOSSidebarOpen(false)}
+        />
+      )}
+
+      {/* Existing modals */}
+      {/* Session Management Modal */}
+      <SessionManagementModal
+        isOpen={isSessionModalOpen}
+        onClose={onSessionModalClose}
+      />
+      
+      {/* Categories Management Modal */}
+      <CategoryManagementModal
+        isOpen={isCategoriesModalOpen}
+        onClose={onCategoriesModalClose}
+        categories={categories}
+        products={products}
+        updateCategories={setCategories}
+        categoryColors={categoryColors}
+        updateCategoryColors={setCategoryColors}
+        categoryService={categoryService}
+      />
+      
+      {/* Products Management Modal */}
+      <ProductManagementModal
+        isOpen={isProductsModalOpen}
+        onClose={onProductsModalClose}
+      />
+      
+      {/* Customers Management Modal */}
+      <CustomerManagementModal
+        isOpen={isCustomersModalOpen}
+        onClose={onCustomersModalClose}
+      />
+      
+      {/* Customer Selector Modal */}
+      <CustomerSelectorModal
+        isOpen={isCustomerSelectorOpen}
+        onClose={onCustomerSelectorClose}
+        onSelectCustomer={handleSelectCustomer}
+        onAddNewCustomer={() => {
+          onCustomerSelectorClose();
+          onCustomersModalOpen();
+        }}
+      />
+      
+      {/* Delete Category Confirmation */}
+      <DeleteCategoryConfirmation />
+      
+      {/* Payment Modal */}
+      <PaymentScreen
+        isOpen={isPaymentModalOpen}
+        onClose={() => setIsPaymentModalOpen(false)}
+        cartTotal={cartTotal}
+        selectedCustomer={selectedCustomer}
+        cart={cart}
+        activePOSSession={activePOSSession}
+        onPaymentComplete={handlePaymentComplete}
+        orderId={orderId}
+        orderType={orderType}
+      />
+      
+      {/* Order Complete Modal */}
+      {completedOrder && (
+        <OrderComplete
+          isOpen={isOrderCompleteOpen}
+          onClose={handleOrderCompleteClose}
+          order={completedOrder}
+          customer={selectedCustomer}
+        />
+      )}
+    </Box>
+  );
+};
+
+export default POSPage; 

@@ -1,0 +1,81 @@
+{
+  "id": "POS-2024-001",
+  "serverOrderId": null,
+  "offlineId": "OFFLINE-2024-001",
+  "status": "completed",
+  "syncStatus": "pending",
+  "isOffline": true,
+  "createdAt": "2024-03-19T10:30:00.000Z",
+  "completedAt": "2024-03-19T10:35:00.000Z",
+  "orderType": "dine_in",
+  "customer": {
+    "id": 1,
+    "name": "John Doe",
+    "phone": "+1234567890",
+    "mobile": "+1234567890",
+    "email": "john@example.com",
+    "address": "123 Main St"
+  },
+  "cart": [
+    {
+      "id": 1,
+      "product_id": 1,
+      "name": "Product 1",
+      "price": 10.00,
+      "quantity": 2,
+      "discount": 0,
+      "tax": {
+        "amount": 0.9,
+        "rate": 0.09
+      },
+      "subtotal": 20.00,
+      "total": 20.90
+    }
+  ],
+  "paymentData": {
+    "method": "cash",
+    "amount": 20.90,
+    "amount_paid": 20.90,
+    "amount_return": 0,
+    "amount_tax": 0.90,
+    "payment_method_id": 1,
+    "payment_status": "paid",
+    "payment_date": "2024-03-19T10:35:00.000Z",
+    "payment_reference": "PAY-2024-001",
+    "payment_details": {
+      "type": "cash",
+      "name": "Cash",
+      "change": 0,
+      "tendered": 20.90
+    },
+    "payment_journal_id": 1,
+    "payment_currency_id": 1,
+    "is_electronic": false
+  },
+  "totals": {
+    "subtotal": 20.00,
+    "discount": 0,
+    "tax": 0.90,
+    "total": 20.90,
+    "total_paid": 20.90,
+    "total_return": 0
+  },
+  "session": {
+    "id": 1,
+    "name": "Point of Sale Session 1",
+    "config_id": [1, "Main POS"]
+  },
+  "meta": {
+    "deviceId": "POS-DEVICE-001",
+    "employeeId": 1,
+    "locationId": 1,
+    "notes": "",
+    "tags": []
+  },
+  "syncDetails": {
+    "lastSyncAttempt": "2024-03-19T10:36:00.000Z",
+    "syncErrors": [],
+    "retryCount": 0,
+    "priority": 1
+  }
+} 
