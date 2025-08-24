@@ -1,7 +1,8 @@
 
 ![Capture](https://github.com/user-attachments/assets/4233dca5-eeec-40c6-ad28-389977e44eb3)
-![Uploading Capture1.JPG…]()
-![Uploading Capture2.JPG…]()
+![Capture1](https://github.com/user-attachments/assets/48b957dc-51a1-4012-bcd1-07a05a59d0f5)
+![Capture2](https://github.com/user-attachments/assets/146bbd7c-03fc-450d-8480-214dce26b6d5)
+
 
 # Odoo POS Client
 
