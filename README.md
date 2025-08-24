@@ -1,4 +1,3 @@
-![Uploading image.png…]()
 
 
 # Odoo POS Client
