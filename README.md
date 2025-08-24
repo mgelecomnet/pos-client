@@ -1,5 +1,6 @@
 ![Uploading image.png…]()
 
+
 # Odoo POS Client
 
 A modern React-based Point of Sale client for Odoo.
